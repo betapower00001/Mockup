@@ -12,34 +12,38 @@ export type PatternItem = {
 };
 
 const patterns: Record<string, PatternItem[]> = {
-  universal: [
+  "TYPE-1": [
     {
-      id: "line-black",
-      name: "Line Black",
-      preview: "/patterns/food/Test.png",
-      img: "/patterns/food/Test.png",
+      id: "t1-test1",
+      name: "TYPE-1 Test 1",
+      preview: "/patterns/TYPE-1/test1.png",
+      img: "/patterns/TYPE-1/test1.png",
     },
-    {
-      id: "carbon",
-      name: "Carbon",
-      preview: "/patterns/thumbs/carbon.png",
-      img: "/patterns/textures/carbon.png",
-    },
-    {
-      id: "dot",
-      name: "Dot",
-      preview: "/patterns/thumbs/dot.png",
-      img: "/patterns/textures/dot.png",
+        {
+      id: "t1-test2",
+      name: "TYPE-1 Test 2",
+      preview: "/patterns/TYPE-1/test2.png",
+      img: "/patterns/TYPE-1/test2.png",
     },
   ],
 
-  thai: [
-    {
-      id: "line-gray",
-      name: "Line Gray",
-      preview: "/patterns/thumbs/line-gray.png",
-      img: "/patterns/textures/line-gray.png",
-    },
+  "TYPE-2": [
+    // ✅ ใส่ลายของ TYPE-2 ในนี้
+    // ตัวอย่าง (ถ้าคุณมีไฟล์ /public/patterns/TYPE-2/test1.png)
+    // {
+    //   id: "t2-test1",
+    //   name: "TYPE-2 Test 1",
+    //   preview: "/patterns/TYPE-2/test1.png",
+    //   img: "/patterns/TYPE-2/test1.png",
+    // },
+  ],
+
+  "TYPE-3": [
+    // ใส่ลายของ TYPE-3
+  ],
+
+  "TYPE-4": [
+    // ใส่ลายของ TYPE-4
   ],
 };
 

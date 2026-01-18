@@ -3,7 +3,7 @@
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Environment, OrbitControls, useGLTF } from "@react-three/drei";
+import { Environment, OrbitControls, useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import type { PlugModelConfig, ColorKey } from "../data/plugConfig";
 import type { LogoTransform } from "./PlugCustomizer";
@@ -13,11 +13,14 @@ import { useStickerTexture } from "./useStickerTexture";
 type Plug3DProps = {
   config: PlugModelConfig;
   logoUrl?: string;
-  patternUrl?: string;
+  patternUrl?: string; // ✅ ลายที่เลือก (texture)
   colors: Partial<Record<ColorKey, string>>;
+
   logoTransform?: LogoTransform;
   onLogoTransformChange?: (t: LogoTransform) => void;
+
   dragLogoMode?: boolean;
+
   renderMode?: boolean;
   onRenderReady?: (render: (opts?: { transparent?: boolean; filename?: string }) => void) => void;
 };
@@ -28,7 +31,9 @@ function normalizeHex(hex?: string): string | null {
   if (!h.startsWith("#")) return null;
   if (h.length === 9) return h.slice(0, 7);
   if (h.length === 4) {
-    const r = h[1], g = h[2], b = h[3];
+    const r = h[1],
+      g = h[2],
+      b = h[3];
     return `#${r}${r}${g}${g}${b}${b}`;
   }
   if (h.length === 7) return h;
@@ -103,8 +108,8 @@ function findMeshByName(scene: THREE.Object3D, name: string): THREE.Mesh | null 
 
 /**
  * ✅ AutoUV (Planar) แบบโค้ดล้วน
- * - สร้าง uv ให้ geometry (ใช้แกน X/Y)
- * - ทำให้ raycaster ให้ e.uv ได้
+ * - สร้าง uv ให้ geometry (ฉายระนาบอัตโนมัติ)
+ * - ทำให้ raycaster ให้ e.uv ได้ (ลากโลโก้ได้)
  */
 function ensurePlanarUV(mesh: THREE.Mesh) {
   const geo = mesh.geometry as THREE.BufferGeometry;
@@ -121,23 +126,19 @@ function ensurePlanarUV(mesh: THREE.Mesh) {
   const size = new THREE.Vector3();
   bb.getSize(size);
 
-  // ✅ เลือกแกนฉายอัตโนมัติ:
-  // - หาแกนที่ "บางสุด" (มีความหนาน้อยสุด) แล้ว "ไม่ใช้" แกนนั้นเป็นระนาบ UV
-  //   เช่น ถ้า Y บางสุด → ใช้ XZ
   const abs = (n: number) => Math.abs(n);
   const sx = abs(size.x) || 1;
   const sy = abs(size.y) || 1;
   const sz = abs(size.z) || 1;
 
   type Axes = "XY" | "XZ" | "YZ";
-  let axes: Axes = "XZ"; // default
+  let axes: Axes = "XZ";
 
   const minAxis = Math.min(sx, sy, sz);
   if (minAxis === sy) axes = "XZ";
   else if (minAxis === sx) axes = "YZ";
   else axes = "XY";
 
-  // ✅ สร้าง UV 0..1 จาก bbox ในระนาบที่เลือก
   const uv = new Float32Array(pos.count * 2);
 
   for (let i = 0; i < pos.count; i++) {
@@ -145,7 +146,8 @@ function ensurePlanarUV(mesh: THREE.Mesh) {
     const y = pos.getY(i);
     const z = pos.getZ(i);
 
-    let u = 0, v = 0;
+    let u = 0,
+      v = 0;
 
     if (axes === "XY") {
       const dx = (bb.max.x - bb.min.x) || 1;
@@ -157,33 +159,28 @@ function ensurePlanarUV(mesh: THREE.Mesh) {
       const dz = (bb.max.z - bb.min.z) || 1;
       u = (x - bb.min.x) / dx;
       v = (z - bb.min.z) / dz;
-    } else { // YZ
+    } else {
       const dy = (bb.max.y - bb.min.y) || 1;
       const dz = (bb.max.z - bb.min.z) || 1;
       u = (y - bb.min.y) / dy;
       v = (z - bb.min.z) / dz;
     }
 
-    // clamp กันหลุด
     u = Math.min(1, Math.max(0, u));
     v = Math.min(1, Math.max(0, v));
 
-    uv[i * 2] = 1 - u;   // ✅ flip U (แก้กลับกระจก)
+    uv[i * 2] = 1 - u; // ✅ flip U กันกระจก
     uv[i * 2 + 1] = v;
-
-
   }
 
   geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   (geo.getAttribute("uv") as THREE.BufferAttribute).needsUpdate = true;
-
-  console.log("[AutoUV] axes:", axes, "size:", { x: sx, y: sy, z: sz });
 }
-
 
 function PlugScene({
   config,
   logoUrl,
+  patternUrl,
   colors,
   logoTransform,
   onLogoTransformChange,
@@ -194,6 +191,7 @@ function PlugScene({
 }: {
   config: PlugModelConfig;
   logoUrl?: string;
+  patternUrl?: string;
   colors: Partial<Record<ColorKey, string>>;
   logoTransform?: LogoTransform;
   onLogoTransformChange?: (t: LogoTransform) => void;
@@ -206,7 +204,7 @@ function PlugScene({
 
   const [logoMesh, setLogoMesh] = useState<THREE.Mesh | null>(null);
 
-  // ✅ หา mesh + AutoUV ให้มัน
+  // ✅ หา mesh ที่ใช้ติดโลโก้ + AutoUV ให้มัน
   useEffect(() => {
     const m = findMeshByName(scene, config.decal.meshName);
     console.log("[Plug3D] meshName:", config.decal.meshName, "found:", !!m, "model:", config.modelPath);
@@ -232,12 +230,58 @@ function PlugScene({
       : undefined
   );
 
+  // ✅ Pattern texture (โหลดลาย)
+  const patternTex = useTexture(patternUrl || "/patterns/food/Test.png");
+  useEffect(() => {
+    if (!patternUrl) return;
+
+    patternTex.colorSpace = THREE.SRGBColorSpace; // ✅ เพิ่มบรรทัดนี้
+    patternTex.wrapS = patternTex.wrapT = THREE.RepeatWrapping;
+    patternTex.repeat.set(1, 1); // ✅ ปรับความถี่ลายได้
+    patternTex.needsUpdate = true;
+  }, [patternUrl, patternTex]);
+
   // ✅ apply สี
   useEffect(() => {
     applyColorsByTargets(scene, config.colorTargets, colors);
   }, [scene, config.colorTargets, colors]);
 
-  // ✅ Overlay mesh (กันพื้นยุบ)
+  // ✅ ใส่ "ลาย" เฉพาะฝาบน (mesh เดียวกับโลโก้)
+  useEffect(() => {
+    if (!logoMesh) return;
+
+    const mats = Array.isArray(logoMesh.material) ? logoMesh.material : [logoMesh.material];
+
+    // ถ้าไม่ได้เลือก pattern -> เอาลายออก
+    if (!patternUrl) {
+      mats.forEach((m: any) => {
+        if (!m) return;
+        if ("map" in m) {
+          m.map = null;
+          m.needsUpdate = true;
+        }
+      });
+      return;
+    }
+
+    mats.forEach((m: any) => {
+      if (!m) return;
+
+      if (
+        m instanceof THREE.MeshStandardMaterial ||
+        m instanceof THREE.MeshPhysicalMaterial ||
+        m instanceof THREE.MeshPhongMaterial ||
+        m instanceof THREE.MeshLambertMaterial
+      ) {
+        m.map = patternTex;
+        m.map.needsUpdate = true;  // ✅ เพิ่ม
+        m.needsUpdate = true;
+      }
+    });
+
+  }, [logoMesh, patternUrl, patternTex]);
+
+  // ✅ Overlay mesh (โลโก้ทับลาย กันพื้นยุบ)
   useEffect(() => {
     if (!logoMesh) return;
 
@@ -299,13 +343,11 @@ function PlugScene({
     });
   }, [onRenderReady, glRef, cameraRef, scene]);
 
-  // ✅ Drag logo ด้วย e.uv (ตอนนี้ไม่ undefined แล้ว เพราะมี AutoUV)
+  // ✅ Drag logo ด้วย e.uv
   const draggingRef = useRef(false);
 
   const onPointerDown = (e: any) => {
     if (!dragLogoMode || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange) return;
-
-    // ✅ ให้โดนเฉพาะชิ้นที่ตั้งใจติดโลโก้
     if (e?.object !== logoMesh) return;
 
     e.stopPropagation();
@@ -317,8 +359,6 @@ function PlugScene({
         x: e.uv.x - 0.5,
         y: 0.5 - e.uv.y,
       });
-    } else {
-      console.log("[Drag] uv still undefined (check UV exists)");
     }
   };
 
@@ -355,6 +395,7 @@ function PlugScene({
 export default function Plug3D({
   config,
   logoUrl,
+  patternUrl,
   colors,
   logoTransform,
   onLogoTransformChange,
@@ -388,6 +429,7 @@ export default function Plug3D({
         <PlugScene
           config={config}
           logoUrl={logoUrl}
+          patternUrl={patternUrl}
           colors={colors}
           logoTransform={logoTransform}
           onLogoTransformChange={onLogoTransformChange}

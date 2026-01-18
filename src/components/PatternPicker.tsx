@@ -1,3 +1,4 @@
+// src/components/PatternPicker.tsx
 "use client";
 
 interface PatternItem {
@@ -25,7 +26,9 @@ export default function PatternPicker({
         {patternsForSelected.map((p) => (
           <img
             key={p.id}
-            src={p.img}
+            src={p.preview || p.img}
+            alt={p.name}
+            title={p.name}
             onClick={() => onSelect(p.img)}
             className="w-full cursor-pointer border"
           />
@@ -38,6 +41,7 @@ export default function PatternPicker({
           <img
             key={i}
             src={url}
+            alt={`upload-${i}`}
             onClick={() => onSelect(url)}
             className="w-full cursor-pointer border"
           />
