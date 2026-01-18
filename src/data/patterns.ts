@@ -7,7 +7,7 @@ export type PatternItem = {
   // ✅ PatternPicker ใช้โชว์ thumbnail
   preview: string;
 
-  // ✅ ใช้แปะจริงบน 3D (texture)
+  // ✅ ใช้แปะจริงบน 3D  (texture)
   img: string;
 };
 
