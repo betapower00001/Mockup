@@ -231,15 +231,25 @@ function PlugScene({
   );
 
   // ✅ Pattern texture (โหลดลาย)
-  const patternTex = useTexture(patternUrl || "/patterns/food/Test.png");
-  useEffect(() => {
-    if (!patternUrl) return;
+  // ✅ Pattern texture (โหลดลาย)
+  // NOTE: useTexture ต้องถูกเรียกทุกครั้ง เลยต้องมี fallback ที่ "มีอยู่จริง"
+  const FALLBACK_TRANSPARENT_PNG =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Q3n8AAAAASUVORK5CYII=";
 
-    patternTex.colorSpace = THREE.SRGBColorSpace; // ✅ เพิ่มบรรทัดนี้
+  const isPatternEnabled = !!patternUrl && patternUrl.trim() !== "";
+  const texUrl = isPatternEnabled ? (patternUrl as string) : FALLBACK_TRANSPARENT_PNG;
+
+  const patternTex = useTexture(texUrl);
+
+  useEffect(() => {
+    if (!isPatternEnabled) return;
+
+    patternTex.colorSpace = THREE.SRGBColorSpace;
     patternTex.wrapS = patternTex.wrapT = THREE.RepeatWrapping;
-    patternTex.repeat.set(1, 1); // ✅ ปรับความถี่ลายได้
+    patternTex.repeat.set(1, 1);
     patternTex.needsUpdate = true;
-  }, [patternUrl, patternTex]);
+  }, [isPatternEnabled, patternTex]);
+
 
   // ✅ apply สี
   useEffect(() => {
@@ -253,7 +263,7 @@ function PlugScene({
     const mats = Array.isArray(logoMesh.material) ? logoMesh.material : [logoMesh.material];
 
     // ถ้าไม่ได้เลือก pattern -> เอาลายออก
-    if (!patternUrl) {
+    if (!isPatternEnabled) {
       mats.forEach((m: any) => {
         if (!m) return;
         if ("map" in m) {
@@ -263,6 +273,7 @@ function PlugScene({
       });
       return;
     }
+
 
     mats.forEach((m: any) => {
       if (!m) return;
@@ -279,7 +290,7 @@ function PlugScene({
       }
     });
 
-  }, [logoMesh, patternUrl, patternTex]);
+  }, [logoMesh, isPatternEnabled, patternTex]);
 
   // ✅ Overlay mesh (โลโก้ทับลาย กันพื้นยุบ)
   useEffect(() => {
