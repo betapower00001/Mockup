@@ -10,13 +10,13 @@ export interface PlugType {
 export const plugTypes: PlugType[] = [
   {
     id: "TYPE-1",
-    name: "Universal",
-    thumb: "/plugs/TYPE-1/thumb.png",
+    name: "Wallace",
+    thumb: "/plugs/TYPE-1/T-1.png",
     modelPath: "/models/plug/Un1.glb",
   },
   {
     id: "TYPE-2",
-    name: "Thai",
+    name: "Arthur",
     thumb: "/plugs/TYPE-2/thumb.png",
     modelPath: "/models/plug/Un2.glb",
   },
@@ -30,6 +30,12 @@ export const plugTypes: PlugType[] = [
     id: "TYPE-4",
     name: "US / UK",
     thumb: "/plugs/TYPE-4/thumb.png",
+    modelPath: "/models/plug/Un4.glb",
+  },
+    {
+    id: "TYPE-5",
+    name: "US / UK",
+    thumb: "/plugs/TYPE-5/thumb.png",
     modelPath: "/models/plug/Un4.glb",
   },
 ];
