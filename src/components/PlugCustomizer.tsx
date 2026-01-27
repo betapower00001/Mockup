@@ -242,17 +242,18 @@ export default function PlugCustomizer({ plugId }: Props) {
           initialColor={customization.bottomColor}
           onColorChange={(c) => setCustomization((s) => ({ ...s, bottomColor: c }))}
         />
+        {/*
         <ColorPicker
           label="สวิตช์"
           initialColor={customization.switchColor}
           onColorChange={(c) => setCustomization((s) => ({ ...s, switchColor: c }))}
         />
-
+        */}
         <h3 style={{ marginTop: 18 }}>มุมมอง</h3>
         <LayoutPreview
           view={customization.view}
           onSetView={(v) => setCustomization((s) => ({ ...s, view: v }))}
-          onDownload={() => {}}
+          onDownload={() => { }}
         />
 
         <h3 style={{ marginTop: 18 }}>ลวดลาย (Pattern)</h3>
