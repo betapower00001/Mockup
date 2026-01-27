@@ -9,12 +9,14 @@ interface LogoUploaderProps {
 
 export default function LogoUploader({ onSelect }: LogoUploaderProps) {
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const input = e.target;              // ✅ เพิ่ม
+    const file = input.files?.[0];
     if (!file) return;
 
     // กันเลือกไฟล์ไม่ใช่รูป
     if (!file.type.startsWith("image/")) {
       alert("กรุณาเลือกไฟล์รูปภาพ (PNG / JPG / SVG)");
+      input.value = "";                  // ✅ เพิ่ม: เคลียร์เพื่อเลือกไฟล์เดิมซ้ำได้
       return;
     }
 
@@ -25,10 +27,12 @@ export default function LogoUploader({ onSelect }: LogoUploaderProps) {
       if (typeof result === "string") {
         onSelect(result); // ✅ ส่ง Base64 string
       }
+      input.value = "";                  // ✅ เพิ่ม: เคลียร์หลังอ่านเสร็จ
     };
 
     reader.onerror = () => {
       alert("อ่านไฟล์ไม่สำเร็จ");
+      input.value = "";                  // ✅ เพิ่ม
     };
 
     reader.readAsDataURL(file); // ⭐ สำคัญมาก
@@ -46,7 +50,16 @@ export default function LogoUploader({ onSelect }: LogoUploaderProps) {
       }}
     >
       อัปโหลด LOGO
-      <input type="file" accept="image/png,image/jpeg,image/svg+xml" hidden onChange={handleFile} />
+      <input
+        type="file"
+        accept="image/png,image/jpeg,image/svg+xml"
+        hidden
+        onChange={handleFile}
+        onClick={(e) => {
+          // ✅ เพิ่ม: กันกรณีกดเลือกไฟล์เดิมทันที (บาง browser ไม่ยิง onChange)
+          (e.currentTarget as HTMLInputElement).value = "";
+        }}
+      />
     </label>
   );
 }
