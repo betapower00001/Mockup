@@ -20,15 +20,18 @@ export type DecalConfig = {
   lockAxes?: boolean;
 
   // local = แบบเดิม
-  // world = โหมด world ต่อผืน (ในโปรเจกต์นี้เราจะใช้เป็น trigger เปิด TRIPLANAR)
+  // world = โหมด world ต่อผืน
   uvSpace?: UVSpace;
+
+  // ✅ NEW: สำหรับ "ลาย" บางชิ้น ไม่ต้องแปะลาย (เช่น TYPE-2 Top_Side)
+  enablePattern?: boolean; // default = true
 };
 
 // ✅ NEW: ตัวเลือกสำหรับ TRIPLANAR (ใช้กับ "ลาย" เท่านั้น)
 export type PatternTriplanarConfig = {
   scale?: number; // ความถี่ลาย
   blend?: number; // ความนุ่มการ blend
-  seed?: number;  // ความสุ่ม
+  seed?: number; // ความสุ่ม
 };
 
 export type PlugModelConfig = {
@@ -46,7 +49,7 @@ export type PlugModelConfig = {
   // ลาย "ด้านข้าง"
   patternSideDecal?: DecalConfig;
 
-  // ✅ NEW: ปรับ triplanar ต่อรุ่น
+  // ปรับ triplanar ต่อรุ่น
   patternTriplanar?: PatternTriplanarConfig;
 
   // mesh ที่ใช้คำนวณ bbox สำหรับ “ผืนเดียว”
@@ -97,7 +100,7 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       switch: ["mat_swit", "Swit"],
     },
 
-    // ให้ลายต่อเป็นผืนเดียว (Top_Front + Top_Side)
+    // ใช้คำนวณ bbox สำหรับ world cover ของ Top_Front
     patternWorldBBoxMeshes: ["Top_Front", "Top_Side"],
 
     // โลโก้ (local)
@@ -112,7 +115,7 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       uvSpace: "local",
     },
 
-    // ✅ ลาย ใช้ world (เป็น trigger เปิด triplanar ใน Plug3D)
+    // ลายหน้า: ใช้ world
     patternDecal: {
       meshName: "Top_Front",
       position: [0, 0, 0.002],
@@ -125,22 +128,24 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       uvSpace: "world",
     },
 
+    // Top_Side: ไม่แปะลายแล้ว (สีพื้นตามโทนเฉลี่ยของลาย คำนวณใน Plug3D)
     patternSideDecal: {
       meshName: "Top_Side",
       position: [0, 0, 0.002],
       rotation: [0, 0, 0],
       scale: 0.35,
 
-      uvProjection: "XY",   // ✅ เปลี่ยนจาก XZ -> XY
+      uvProjection: "XY",
       flipU: true,
       flipV: false,
 
       forceUV: true,
-      lockAxes: true,       // ✅ กันโค้ด fallback ไปเลือกแกนอื่นเอง
+      lockAxes: true,
       uvSpace: "world",
+
+      enablePattern: false, // ✅ ปิดการแปะลายด้านข้าง
     },
 
-    // ✅ ค่า default ลายแบบ triplanar (ปรับได้)
     patternTriplanar: {
       scale: 2.5,
       blend: 6.0,
