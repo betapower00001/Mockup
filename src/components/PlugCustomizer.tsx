@@ -715,7 +715,7 @@ const CSS = `
     min-height: 100vh;
     background:
       radial-gradient(1200px 500px at 20% 0%, rgba(90,140,255,.12), transparent 60%),
-      linear-gradient(#f7f9fc, #f5f7fb);
+      linear-gradient(#f7f9fc, #cc0773);
     padding: 14px 14px;
   }
 
@@ -779,7 +779,7 @@ const CSS = `
   .mock{
     height: var(--mockH);
     border-radius: 14px;
-    background: linear-gradient(180deg, #f2f6fb, #edf2fb);
+    background: linear-gradient(180deg, #003a81, #edf2fb);
     border: 1px solid rgba(220,226,240,.9);
     overflow: hidden;
   }
@@ -790,7 +790,7 @@ const CSS = `
     padding: 7px 12px;
     border-radius: 12px;
     border: 1px solid rgba(210,218,235,.9);
-    background: rgba(255,255,255,.9);
+    background: rgba(0, 17, 53, 0.9);
     cursor: pointer;
     font-weight: 800;
     transition: all .18s ease;
@@ -869,7 +869,7 @@ const CSS = `
     height:34px;
     border-radius: 12px;
     border: 1px solid rgba(210,218,235,.9);
-    background: rgba(255,255,255,.9);
+    background: rgba(0, 32, 136, 0.9);
     cursor:pointer;
     font-weight: 900;
     transition: all .18s ease;
@@ -891,7 +891,7 @@ const CSS = `
     padding: 10px 10px;
     border-radius: 14px;
     border: 1px solid rgba(210,218,235,.9);
-    background: rgba(255,255,255,.9);
+    background: rgba(255, 255, 255, 0.9);
     cursor: pointer;
     transition: all .18s ease;
     text-align: left;

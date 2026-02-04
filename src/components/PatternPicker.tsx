@@ -118,7 +118,7 @@ export default function PatternPicker({
         <label
           style={{
             padding: "8px 12px",
-            background: "rgba(255,255,255,.9)",
+            background: "rgba(0, 179, 185, 0.9)",
             borderRadius: 12,
             cursor: "pointer",
             border: "1px solid rgba(210,218,235,.9)",
@@ -140,7 +140,7 @@ export default function PatternPicker({
             padding: "8px 12px",
             borderRadius: 12,
             border: "1px solid rgba(210,218,235,.9)",
-            background: "rgba(255,255,255,.9)",
+            background: "rgba(160, 0, 0, 0.9)",
             fontWeight: 900,
             cursor: disableReset ? "not-allowed" : "pointer",
             opacity: disableReset ? 0.5 : 1,
