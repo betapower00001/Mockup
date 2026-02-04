@@ -5,19 +5,27 @@ import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Environment, OrbitControls, useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
-import type { PlugModelConfig, ColorKey } from "../data/plugConfig";
+import type { PlugModelConfig, ColorKey, UVProjection, UVSpace } from "../data/plugConfig";
 import type { LogoTransform } from "./PlugCustomizer";
 import FitToObject from "./FitToObject";
 import { useStickerTexture } from "./useStickerTexture";
 
+export type PatternTransform = {
+  x: number; // 0..1
+  y: number; // 0..1
+  zoom: number; // 1..
+};
+
 type Plug3DProps = {
   config: PlugModelConfig;
   logoUrl?: string;
-  patternUrl?: string; // ✅ ลายที่เลือก (texture)
+  patternUrl?: string;
   colors: Partial<Record<ColorKey, string>>;
 
   logoTransform?: LogoTransform;
   onLogoTransformChange?: (t: LogoTransform) => void;
+
+  patternTransform?: PatternTransform;
 
   dragLogoMode?: boolean;
 
@@ -38,6 +46,10 @@ function normalizeHex(hex?: string): string | null {
   }
   if (h.length === 7) return h;
   return null;
+}
+
+function clamp01(v: number) {
+  return Math.min(1, Math.max(0, v));
 }
 
 function applyColorsByTargets(
@@ -85,8 +97,8 @@ function applyColorsByTargets(
       const cloned = clonedByUUID.get(uuid) ?? m.clone();
       clonedByUUID.set(uuid, cloned);
 
-      if (cloned.color) cloned.color = col.clone();
-      cloned.needsUpdate = true;
+      if ((cloned as any).color) (cloned as any).color = col.clone();
+      (cloned as any).needsUpdate = true;
 
       return cloned;
     });
@@ -107,39 +119,87 @@ function findMeshByName(scene: THREE.Object3D, name: string): THREE.Mesh | null 
 }
 
 /**
- * ✅ AutoUV (Planar) แบบโค้ดล้วน
- * - สร้าง uv ให้ geometry (ฉายระนาบอัตโนมัติ)
- * - ทำให้ raycaster ให้ e.uv ได้ (ลากโลโก้ได้)
+ * เลือก plane ที่มีพื้นที่มากสุด: XY / XZ / YZ
  */
-function ensurePlanarUV(mesh: THREE.Mesh) {
+function pickBestAxesFromBBox(mesh: THREE.Mesh): UVProjection {
+  const geo = mesh.geometry as THREE.BufferGeometry;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return "XZ";
+
+  const size = new THREE.Vector3();
+  bb.getSize(size);
+
+  const sx = Math.abs(size.x) || 1;
+  const sy = Math.abs(size.y) || 1;
+  const sz = Math.abs(size.z) || 1;
+
+  const areaXY = sx * sy;
+  const areaXZ = sx * sz;
+  const areaYZ = sy * sz;
+
+  if (areaXZ >= areaXY && areaXZ >= areaYZ) return "XZ";
+  if (areaYZ >= areaXY && areaYZ >= areaXZ) return "YZ";
+  return "XY";
+}
+
+/**
+ * ✅ Local planar UV (ของเดิม) + force/lockAxes
+ */
+function ensurePlanarUV(
+  mesh: THREE.Mesh,
+  axes?: UVProjection,
+  flipU?: boolean,
+  flipV?: boolean,
+  force?: boolean,
+  lockAxes?: boolean
+) {
   const geo = mesh.geometry as THREE.BufferGeometry;
   const pos = geo.getAttribute("position") as THREE.BufferAttribute;
   if (!pos) return;
 
   const existingUV = geo.getAttribute("uv") as THREE.BufferAttribute | undefined;
-  if (existingUV && existingUV.count === pos.count) return;
+  if (!force && existingUV && existingUV.count === pos.count) return;
+
+  const baseFlipU = true;
 
   geo.computeBoundingBox();
   const bb = geo.boundingBox;
   if (!bb) return;
 
-  const size = new THREE.Vector3();
-  bb.getSize(size);
+  const best = pickBestAxesFromBBox(mesh);
+  let useAxes: UVProjection = axes || best;
 
-  const abs = (n: number) => Math.abs(n);
-  const sx = abs(size.x) || 1;
-  const sy = abs(size.y) || 1;
-  const sz = abs(size.z) || 1;
+  if (!lockAxes) {
+    const size = new THREE.Vector3();
+    bb.getSize(size);
 
-  type Axes = "XY" | "XZ" | "YZ";
-  let axes: Axes = "XZ";
+    const sx = Math.abs(size.x) || 1;
+    const sy = Math.abs(size.y) || 1;
+    const sz = Math.abs(size.z) || 1;
 
-  const minAxis = Math.min(sx, sy, sz);
-  if (minAxis === sy) axes = "XZ";
-  else if (minAxis === sx) axes = "YZ";
-  else axes = "XY";
+    const du = useAxes === "XY" ? sx : useAxes === "XZ" ? sx : sy;
+    const dv = useAxes === "XY" ? sy : useAxes === "XZ" ? sz : sz;
+
+    const bdu = best === "XY" ? sx : best === "XZ" ? sx : sy;
+    const bdv = best === "XY" ? sy : best === "XZ" ? sz : sz;
+
+    const EPS = 1e-6;
+    const aspect = du / Math.max(dv, EPS);
+    const bestAspect = bdu / Math.max(bdv, EPS);
+
+    const ASPECT_LIMIT = 20;
+    const extreme = du < EPS || dv < EPS || aspect > ASPECT_LIMIT || aspect < 1 / ASPECT_LIMIT;
+    const bestIsBetter = bestAspect <= ASPECT_LIMIT && bestAspect >= 1 / ASPECT_LIMIT;
+
+    if (extreme && bestIsBetter) useAxes = best;
+  }
 
   const uv = new Float32Array(pos.count * 2);
+
+  const dx = (bb.max.x - bb.min.x) || 1;
+  const dy = (bb.max.y - bb.min.y) || 1;
+  const dz = (bb.max.z - bb.min.z) || 1;
 
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
@@ -149,32 +209,292 @@ function ensurePlanarUV(mesh: THREE.Mesh) {
     let u = 0,
       v = 0;
 
-    if (axes === "XY") {
-      const dx = (bb.max.x - bb.min.x) || 1;
-      const dy = (bb.max.y - bb.min.y) || 1;
+    if (useAxes === "XY") {
       u = (x - bb.min.x) / dx;
       v = (y - bb.min.y) / dy;
-    } else if (axes === "XZ") {
-      const dx = (bb.max.x - bb.min.x) || 1;
-      const dz = (bb.max.z - bb.min.z) || 1;
+    } else if (useAxes === "XZ") {
       u = (x - bb.min.x) / dx;
       v = (z - bb.min.z) / dz;
     } else {
-      const dy = (bb.max.y - bb.min.y) || 1;
-      const dz = (bb.max.z - bb.min.z) || 1;
       u = (y - bb.min.y) / dy;
       v = (z - bb.min.z) / dz;
     }
 
-    u = Math.min(1, Math.max(0, u));
-    v = Math.min(1, Math.max(0, v));
+    if (baseFlipU) u = 1 - u;
+    if (flipU) u = 1 - u;
+    if (flipV) v = 1 - v;
 
-    uv[i * 2] = 1 - u; // ✅ flip U กันกระจก
+    uv[i * 2] = Math.min(1, Math.max(0, u));
+    uv[i * 2 + 1] = Math.min(1, Math.max(0, v));
+  }
+
+  geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  (geo.getAttribute("uv") as THREE.BufferAttribute).needsUpdate = true;
+}
+
+// -------------------------
+// ✅ WORLD PLANAR UV + COVER
+// -------------------------
+function getDuDvFromWorldBox(bb: THREE.Box3, axes: UVProjection) {
+  const dx = Math.abs(bb.max.x - bb.min.x) || 1;
+  const dy = Math.abs(bb.max.y - bb.min.y) || 1;
+  const dz = Math.abs(bb.max.z - bb.min.z) || 1;
+
+  if (axes === "XY") return { du: dx, dv: dy };
+  if (axes === "XZ") return { du: dx, dv: dz };
+  return { du: dy, dv: dz };
+}
+
+/**
+ * ✅ สร้าง UV จาก world position เพื่อให้ “ต่อผืนเดียว” ระหว่างหลาย mesh
+ */
+function ensureWorldPlanarUV(args: {
+  mesh: THREE.Mesh;
+  axes: UVProjection;
+  worldBBox: THREE.Box3;
+  force?: boolean;
+  flipU?: boolean;
+  flipV?: boolean;
+}) {
+  const { mesh, axes, worldBBox, force, flipU, flipV } = args;
+
+  const geo = mesh.geometry as THREE.BufferGeometry;
+  const pos = geo.getAttribute("position") as THREE.BufferAttribute;
+  if (!pos) return;
+
+  const existingUV = geo.getAttribute("uv") as THREE.BufferAttribute | undefined;
+  if (!force && existingUV && existingUV.count === pos.count) return;
+
+  mesh.updateWorldMatrix(true, false);
+
+  const dx = (worldBBox.max.x - worldBBox.min.x) || 1;
+  const dy = (worldBBox.max.y - worldBBox.min.y) || 1;
+  const dz = (worldBBox.max.z - worldBBox.min.z) || 1;
+
+  const vLocal = new THREE.Vector3();
+  const vWorld = new THREE.Vector3();
+  const uv = new Float32Array(pos.count * 2);
+
+  const baseFlipU = true; // ให้ทิศเหมือนของเดิม
+
+  for (let i = 0; i < pos.count; i++) {
+    vLocal.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+    vWorld.copy(vLocal).applyMatrix4(mesh.matrixWorld);
+
+    let u = 0,
+      v = 0;
+
+    if (axes === "XY") {
+      u = (vWorld.x - worldBBox.min.x) / dx;
+      v = (vWorld.y - worldBBox.min.y) / dy;
+    } else if (axes === "XZ") {
+      u = (vWorld.x - worldBBox.min.x) / dx;
+      v = (vWorld.z - worldBBox.min.z) / dz;
+    } else {
+      u = (vWorld.y - worldBBox.min.y) / dy;
+      v = (vWorld.z - worldBBox.min.z) / dz;
+    }
+
+    if (baseFlipU) u = 1 - u;
+    if (flipU) u = 1 - u;
+    if (flipV) v = 1 - v;
+
+    uv[i * 2] = u;
     uv[i * 2 + 1] = v;
   }
 
   geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   (geo.getAttribute("uv") as THREE.BufferAttribute).needsUpdate = true;
+}
+
+/**
+ * ✅ cover + pan/zoom โดยอิง “surface size” (worldBBox เดียวกัน → ต่อผืนเดียว)
+ */
+function applyCoverWithPanOnSurface(
+  tex: THREE.Texture,
+  texW: number,
+  texH: number,
+  surfaceU: number,
+  surfaceV: number,
+  pan?: PatternTransform
+) {
+  const EPS = 1e-6;
+  const texAspect = texW / texH;
+  const surfAspect = surfaceU / Math.max(surfaceV, EPS);
+
+  let repX = 1;
+  let repY = 1;
+
+  // cover: ไม่ยืด แต่ crop ได้
+  if (surfAspect > texAspect) {
+    repX = 1;
+    repY = texAspect / surfAspect;
+  } else {
+    repY = 1;
+    repX = surfAspect / texAspect;
+  }
+
+  const zoom = Math.max(1, pan?.zoom ?? 1);
+  repX /= zoom;
+  repY /= zoom;
+
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.repeat.set(repX, repY);
+
+  const rangeX = Math.max(0, 1 - repX);
+  const rangeY = Math.max(0, 1 - repY);
+
+  const px = clamp01(pan?.x ?? 0.5);
+  const py = clamp01(pan?.y ?? 0.5);
+
+  tex.offset.set(rangeX * px, rangeY * (1 - py));
+  tex.needsUpdate = true;
+}
+
+function computePatternWorldBBox(scene: THREE.Object3D, meshNames?: string[]) {
+  scene.updateMatrixWorld(true);
+
+  const box = new THREE.Box3();
+  const tmp = new THREE.Box3();
+
+  if (meshNames && meshNames.length > 0) {
+    let any = false;
+    for (const n of meshNames) {
+      const m = findMeshByName(scene, n);
+      if (!m) continue;
+      m.updateWorldMatrix(true, false);
+      tmp.setFromObject(m);
+      box.union(tmp);
+      any = true;
+    }
+    if (any) return box;
+  }
+
+  box.setFromObject(scene);
+  return box;
+}
+
+// --------------------------------------
+// ✅ apply pattern to a mesh
+// - worldBBox => world-planar cover (ต่อผืนเดียว)
+// - no worldBBox => local cover (ต่อชิ้น)
+// --------------------------------------
+function applyPatternToMesh(args: {
+  targetMesh: THREE.Mesh;
+  patternTex: THREE.Texture;
+  isPatternEnabled: boolean;
+  axes: UVProjection;
+  pan?: PatternTransform;
+  worldBBox?: THREE.Box3 | null;
+}) {
+  const { targetMesh, patternTex, isPatternEnabled, axes, pan, worldBBox } = args;
+
+  const mats = Array.isArray(targetMesh.material) ? targetMesh.material : [targetMesh.material];
+
+  if (!isPatternEnabled) {
+    mats.forEach((m: any) => {
+      if (!m) return;
+      if ("map" in m) {
+        m.map = null;
+        m.needsUpdate = true;
+      }
+    });
+    return () => {};
+  }
+
+  const p = pan ?? { x: 0.5, y: 0.5, zoom: 1 };
+
+  // ✅ WORLD-PLANAR COVER (ต่อผืนเดียว)
+  if (worldBBox) {
+    const tex = patternTex.clone();
+    tex.colorSpace = THREE.SRGBColorSpace;
+    (tex as any).flipY = false;
+    tex.needsUpdate = true;
+
+    const img: any = (tex as any).image;
+    const w = img?.width;
+    const h = img?.height;
+
+    if (w && h) {
+      const { du, dv } = getDuDvFromWorldBox(worldBBox, axes);
+      applyCoverWithPanOnSurface(tex, w, h, du, dv, p);
+    } else {
+      tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.repeat.set(1, 1);
+      tex.offset.set(0, 0);
+      tex.needsUpdate = true;
+    }
+
+    mats.forEach((m: any) => {
+      if (!m) return;
+      m.map = tex;
+      m.needsUpdate = true;
+    });
+
+    return () => {
+      try {
+        tex.dispose();
+      } catch {}
+    };
+  }
+
+  // ✅ LOCAL COVER (ต่อชิ้น แบบเดิม)
+  const tex = patternTex.clone();
+  tex.colorSpace = THREE.SRGBColorSpace;
+  (tex as any).flipY = false;
+  tex.needsUpdate = true;
+
+  const img: any = (tex as any).image;
+  const w = img?.width;
+  const h = img?.height;
+
+  if (w && h) {
+    const geo = targetMesh.geometry as THREE.BufferGeometry;
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+
+    if (bb) {
+      const size = new THREE.Vector3();
+      bb.getSize(size);
+
+      const sx = Math.abs(size.x) || 1;
+      const sy = Math.abs(size.y) || 1;
+      const sz = Math.abs(size.z) || 1;
+
+      const surfaceU = axes === "XY" ? sx : axes === "XZ" ? sx : sy;
+      const surfaceV = axes === "XY" ? sy : axes === "XZ" ? sz : sz;
+
+      applyCoverWithPanOnSurface(tex, w, h, surfaceU, surfaceV, p);
+    }
+  } else {
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.repeat.set(1, 1);
+    tex.offset.set(0, 0);
+    tex.needsUpdate = true;
+  }
+
+  mats.forEach((m: any) => {
+    if (!m) return;
+    if (
+      m instanceof THREE.MeshStandardMaterial ||
+      m instanceof THREE.MeshPhysicalMaterial ||
+      m instanceof THREE.MeshPhongMaterial ||
+      m instanceof THREE.MeshLambertMaterial
+    ) {
+      m.map = tex;
+      m.needsUpdate = true;
+    } else {
+      // เผื่อ material แปลกจาก GLB
+      (m as any).map = tex;
+      (m as any).needsUpdate = true;
+    }
+  });
+
+  return () => {
+    try {
+      tex.dispose();
+    } catch {}
+  };
 }
 
 function PlugScene({
@@ -184,6 +504,7 @@ function PlugScene({
   colors,
   logoTransform,
   onLogoTransformChange,
+  patternTransform,
   dragLogoMode,
   onRenderReady,
   glRef,
@@ -195,6 +516,7 @@ function PlugScene({
   colors: Partial<Record<ColorKey, string>>;
   logoTransform?: LogoTransform;
   onLogoTransformChange?: (t: LogoTransform) => void;
+  patternTransform?: PatternTransform;
   dragLogoMode?: boolean;
   onRenderReady?: Plug3DProps["onRenderReady"];
   glRef: React.MutableRefObject<THREE.WebGLRenderer | null>;
@@ -203,96 +525,244 @@ function PlugScene({
   const { scene } = useGLTF(config.modelPath);
 
   const [logoMesh, setLogoMesh] = useState<THREE.Mesh | null>(null);
+  const [patternMesh, setPatternMesh] = useState<THREE.Mesh | null>(null);
+  const [patternSideMesh, setPatternSideMesh] = useState<THREE.Mesh | null>(null);
 
-  // ✅ หา mesh ที่ใช้ติดโลโก้ + AutoUV ให้มัน
+  // ✅ world bbox สำหรับ “ต่อผืนเดียว”
+  const patternWorldBBox = useMemo(() => {
+    const wantsWorld =
+      config.patternDecal?.uvSpace === "world" || config.patternSideDecal?.uvSpace === "world";
+    if (!wantsWorld) return null;
+
+    return computePatternWorldBBox(scene, config.patternWorldBBoxMeshes);
+  }, [
+    scene,
+    config.modelPath,
+    config.patternDecal?.uvSpace,
+    config.patternSideDecal?.uvSpace,
+    (config.patternWorldBBoxMeshes || []).join("|"),
+  ]);
+
+  // โลโก้ (Front) — local UV
   useEffect(() => {
     const m = findMeshByName(scene, config.decal.meshName);
-    console.log("[Plug3D] meshName:", config.decal.meshName, "found:", !!m, "model:", config.modelPath);
-
     if (m) {
-      ensurePlanarUV(m);
-      const uvAttr = (m.geometry as THREE.BufferGeometry).getAttribute("uv");
-      console.log("[Plug3D] uv exists:", !!uvAttr, "uv count:", uvAttr?.count);
+      ensurePlanarUV(
+        m,
+        config.decal.uvProjection,
+        config.decal.flipU,
+        config.decal.flipV,
+        config.decal.forceUV,
+        config.decal.lockAxes
+      );
     }
     setLogoMesh(m);
-  }, [scene, config.decal.meshName, config.modelPath]);
+  }, [
+    scene,
+    config.modelPath,
+    config.decal.meshName,
+    config.decal.uvProjection,
+    config.decal.flipU,
+    config.decal.flipV,
+    config.decal.forceUV,
+    config.decal.lockAxes,
+  ]);
 
-  // ✅ Sticker texture (วาดโลโก้ลง canvas)
+  // ลายหน้า (Front pattern) — ถ้า world จะสร้าง world-planar UV
+  useEffect(() => {
+    const meshName = config.patternDecal?.meshName ?? config.decal.meshName;
+    const pm = findMeshByName(scene, meshName);
+
+    if (pm && config.patternDecal) {
+      const axes = (config.patternDecal.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
+      const fu = config.patternDecal.flipU ?? config.decal.flipU;
+      const fv = config.patternDecal.flipV ?? config.decal.flipV;
+      const force = config.patternDecal.forceUV ?? false;
+      const space: UVSpace = config.patternDecal.uvSpace ?? "local";
+
+      if (space === "world" && patternWorldBBox) {
+        ensureWorldPlanarUV({
+          mesh: pm,
+          axes,
+          worldBBox: patternWorldBBox,
+          force: true,
+          flipU: fu,
+          flipV: fv,
+        });
+      } else {
+        ensurePlanarUV(pm, axes, fu, fv, force, config.patternDecal.lockAxes);
+      }
+    }
+
+    setPatternMesh(pm);
+  }, [
+    scene,
+    config.modelPath,
+    config.decal.meshName,
+    config.decal.uvProjection,
+    config.decal.flipU,
+    config.decal.flipV,
+    config.patternDecal?.meshName,
+    config.patternDecal?.uvProjection,
+    config.patternDecal?.flipU,
+    config.patternDecal?.flipV,
+    config.patternDecal?.forceUV,
+    config.patternDecal?.lockAxes,
+    config.patternDecal?.uvSpace,
+    patternWorldBBox,
+  ]);
+
+  // ลายด้านข้าง (Top_Side) — ถ้า world จะสร้าง world-planar UV
+  useEffect(() => {
+    const sideName = config.patternSideDecal?.meshName;
+    const sm = sideName ? findMeshByName(scene, sideName) : null;
+
+    if (sm && config.patternSideDecal) {
+      const axes = (config.patternSideDecal.uvProjection ??
+        config.patternDecal?.uvProjection ??
+        config.decal.uvProjection ??
+        "XZ") as UVProjection;
+
+      const fu = config.patternSideDecal.flipU ?? config.patternDecal?.flipU ?? config.decal.flipU;
+      const fv = config.patternSideDecal.flipV ?? config.patternDecal?.flipV ?? config.decal.flipV;
+
+      const space: UVSpace = config.patternSideDecal.uvSpace ?? "local";
+
+      if (space === "world" && patternWorldBBox) {
+        ensureWorldPlanarUV({
+          mesh: sm,
+          axes,
+          worldBBox: patternWorldBBox,
+          force: true,
+          flipU: fu,
+          flipV: fv,
+        });
+      } else {
+        ensurePlanarUV(
+          sm,
+          axes,
+          fu,
+          fv,
+          config.patternSideDecal.forceUV ?? false,
+          config.patternSideDecal.lockAxes
+        );
+      }
+    }
+
+    setPatternSideMesh(sm);
+  }, [
+    scene,
+    config.modelPath,
+    config.patternSideDecal?.meshName,
+    config.patternSideDecal?.uvProjection,
+    config.patternSideDecal?.flipU,
+    config.patternSideDecal?.flipV,
+    config.patternSideDecal?.forceUV,
+    config.patternSideDecal?.lockAxes,
+    config.patternSideDecal?.uvSpace,
+    config.patternDecal?.uvProjection,
+    config.patternDecal?.flipU,
+    config.patternDecal?.flipV,
+    config.decal.uvProjection,
+    config.decal.flipU,
+    config.decal.flipV,
+    patternWorldBBox,
+  ]);
+
   const stickerTex = useStickerTexture(
     logoUrl,
     logoTransform
       ? {
-        x: logoTransform.x,
-        y: logoTransform.y,
-        scale: Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale,
-        rot: logoTransform.rot,
-      }
+          x: logoTransform.x,
+          y: logoTransform.y,
+          scale: Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale,
+          rot: logoTransform.rot,
+        }
       : undefined
   );
 
-  // ✅ Pattern texture (โหลดลาย)
-  // ✅ Pattern texture (โหลดลาย)
-  // NOTE: useTexture ต้องถูกเรียกทุกครั้ง เลยต้องมี fallback ที่ "มีอยู่จริง"
   const FALLBACK_TRANSPARENT_PNG =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Q3n8AAAAASUVORK5CYII=";
 
   const isPatternEnabled = !!patternUrl && patternUrl.trim() !== "";
   const texUrl = isPatternEnabled ? (patternUrl as string) : FALLBACK_TRANSPARENT_PNG;
-
   const patternTex = useTexture(texUrl);
 
-  useEffect(() => {
-    if (!isPatternEnabled) return;
-
-    patternTex.colorSpace = THREE.SRGBColorSpace;
-    patternTex.wrapS = patternTex.wrapT = THREE.RepeatWrapping;
-    patternTex.repeat.set(1, 1);
-    patternTex.needsUpdate = true;
-  }, [isPatternEnabled, patternTex]);
-
-
-  // ✅ apply สี
   useEffect(() => {
     applyColorsByTargets(scene, config.colorTargets, colors);
   }, [scene, config.colorTargets, colors]);
 
-  // ✅ ใส่ "ลาย" เฉพาะฝาบน (mesh เดียวกับโลโก้)
+  // ✅ ลายหน้า
   useEffect(() => {
-    if (!logoMesh) return;
+    const targetMesh = patternMesh ?? logoMesh;
+    if (!targetMesh) return;
 
-    const mats = Array.isArray(logoMesh.material) ? logoMesh.material : [logoMesh.material];
+    const axes = (config.patternDecal?.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
+    const pan = patternTransform ?? { x: 0.5, y: 0.5, zoom: 1 };
+    const wantsWorld = config.patternDecal?.uvSpace === "world";
 
-    // ถ้าไม่ได้เลือก pattern -> เอาลายออก
-    if (!isPatternEnabled) {
-      mats.forEach((m: any) => {
-        if (!m) return;
-        if ("map" in m) {
-          m.map = null;
-          m.needsUpdate = true;
-        }
-      });
-      return;
-    }
-
-
-    mats.forEach((m: any) => {
-      if (!m) return;
-
-      if (
-        m instanceof THREE.MeshStandardMaterial ||
-        m instanceof THREE.MeshPhysicalMaterial ||
-        m instanceof THREE.MeshPhongMaterial ||
-        m instanceof THREE.MeshLambertMaterial
-      ) {
-        m.map = patternTex;
-        m.map.needsUpdate = true;  // ✅ เพิ่ม
-        m.needsUpdate = true;
-      }
+    const cleanup = applyPatternToMesh({
+      targetMesh,
+      patternTex,
+      isPatternEnabled,
+      axes,
+      pan,
+      worldBBox: wantsWorld ? patternWorldBBox : null,
     });
 
-  }, [logoMesh, isPatternEnabled, patternTex]);
+    return cleanup;
+  }, [
+    logoMesh,
+    patternMesh,
+    isPatternEnabled,
+    patternTex,
+    patternTransform?.x,
+    patternTransform?.y,
+    patternTransform?.zoom,
+    config.decal.uvProjection,
+    config.patternDecal?.uvProjection,
+    config.patternDecal?.uvSpace,
+    patternWorldBBox,
+  ]);
 
-  // ✅ Overlay mesh (โลโก้ทับลาย กันพื้นยุบ)
+  // ✅ ลายด้านข้าง — ใช้ bbox เดียวกัน → ต่อผืนเดียวกับ Top_Front
+  useEffect(() => {
+    if (!patternSideMesh) return;
+
+    const axes =
+      (config.patternSideDecal?.uvProjection ??
+        config.patternDecal?.uvProjection ??
+        config.decal.uvProjection ??
+        "XZ") as UVProjection;
+
+    const pan = patternTransform ?? { x: 0.5, y: 0.5, zoom: 1 };
+    const wantsWorld = config.patternSideDecal?.uvSpace === "world";
+
+    const cleanup = applyPatternToMesh({
+      targetMesh: patternSideMesh,
+      patternTex,
+      isPatternEnabled,
+      axes,
+      pan,
+      worldBBox: wantsWorld ? patternWorldBBox : null,
+    });
+
+    return cleanup;
+  }, [
+    patternSideMesh,
+    isPatternEnabled,
+    patternTex,
+    patternTransform?.x,
+    patternTransform?.y,
+    patternTransform?.zoom,
+    config.patternSideDecal?.uvProjection,
+    config.patternSideDecal?.uvSpace,
+    config.patternDecal?.uvProjection,
+    config.decal.uvProjection,
+    patternWorldBBox,
+  ]);
+
+  // โลโก้ overlay
   useEffect(() => {
     if (!logoMesh) return;
 
@@ -300,6 +770,9 @@ function PlugScene({
     if (old) old.parent?.remove(old);
 
     if (!logoUrl || !stickerTex) return;
+
+    stickerTex.flipY = false;
+    stickerTex.needsUpdate = true;
 
     const overlayMat = new THREE.MeshBasicMaterial({
       map: stickerTex,
@@ -325,7 +798,7 @@ function PlugScene({
     };
   }, [logoMesh, stickerTex, logoUrl]);
 
-  // ✅ Render download callback
+  // render export
   useEffect(() => {
     if (!onRenderReady) return;
 
@@ -354,7 +827,7 @@ function PlugScene({
     });
   }, [onRenderReady, glRef, cameraRef, scene]);
 
-  // ✅ Drag logo ด้วย e.uv
+  // drag logo
   const draggingRef = useRef(false);
 
   const onPointerDown = (e: any) => {
@@ -374,7 +847,15 @@ function PlugScene({
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragLogoMode || !draggingRef.current || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange) return;
+    if (
+      !dragLogoMode ||
+      !draggingRef.current ||
+      !logoUrl ||
+      !logoMesh ||
+      !logoTransform ||
+      !onLogoTransformChange
+    )
+      return;
     if (e?.object !== logoMesh) return;
 
     e.stopPropagation();
@@ -410,6 +891,7 @@ export default function Plug3D({
   colors,
   logoTransform,
   onLogoTransformChange,
+  patternTransform,
   dragLogoMode = false,
   renderMode = false,
   onRenderReady,
@@ -444,6 +926,7 @@ export default function Plug3D({
           colors={colors}
           logoTransform={logoTransform}
           onLogoTransformChange={onLogoTransformChange}
+          patternTransform={patternTransform}
           dragLogoMode={dragLogoMode}
           onRenderReady={onRenderReady}
           glRef={glRef}

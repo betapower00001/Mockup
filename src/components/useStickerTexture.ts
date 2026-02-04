@@ -5,10 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 
 export type StickerParams = {
-  x: number;     // -0.5..0.5
-  y: number;     // -0.5..0.5
+  x: number; // -0.5..0.5
+  y: number; // -0.5..0.5
   scale: number; // 0.01..1
-  rot: number;   // radians
+  rot: number; // radians
 };
 
 export function useStickerTexture(logoUrl?: string, params?: StickerParams) {
@@ -28,8 +28,8 @@ export function useStickerTexture(logoUrl?: string, params?: StickerParams) {
     t.wrapT = THREE.ClampToEdgeWrapping;
     t.anisotropy = 8;
     t.needsUpdate = true;
+    (t as any).flipY = false;
     setTex(t);
-
     return () => t.dispose();
   }, [canvas]);
 
@@ -61,9 +61,14 @@ export function useStickerTexture(logoUrl?: string, params?: StickerParams) {
       const py = cy - p.y * canvas.height;
 
       const base = Math.min(canvas.width, canvas.height);
-      const targetW = base * p.scale;
-      const aspect = img.width / img.height;
-      const targetH = targetW / aspect;
+      const box = Math.max(1, base * p.scale);
+
+      const iw = Math.max(1, img.width);
+      const ih = Math.max(1, img.height);
+
+      const s = Math.min(box / iw, box / ih);
+      const targetW = iw * s;
+      const targetH = ih * s;
 
       ctx.save();
       ctx.translate(px, py);
