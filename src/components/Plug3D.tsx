@@ -38,6 +38,26 @@ type Plug3DProps = {
   onRenderReady?: (render: (opts?: { transparent?: boolean; filename?: string }) => void) => void;
 };
 
+// ----------------------------------------------------
+// ✅ กันแอปพังจาก Environment preset โหลด HDR ไม่ได้
+// ----------------------------------------------------
+class EnvErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch() {
+    // ไม่ต้องทำอะไร แค่กัน crash
+  }
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
+
 function normalizeHex(hex?: string): string | null {
   if (!hex) return null;
   const h = hex.trim();
@@ -389,6 +409,7 @@ function applyCoverWithPanOnSurface(
   let repX = 1;
   let repY = 1;
 
+  // cover: ไม่ยืด แต่ crop ได้
   if (surfAspect > texAspect) {
     repX = 1;
     repY = texAspect / surfAspect;
@@ -438,7 +459,7 @@ function computePatternWorldBBox(scene: THREE.Object3D, meshNames?: string[]) {
 }
 
 // --------------------------------------
-// ✅ apply pattern as OVERLAY (รับแสง + กันสีทับลาย)
+// ✅ apply pattern as OVERLAY (กันสีทับลาย)
 // --------------------------------------
 function clearPatternOverlay(mesh: THREE.Mesh) {
   const old = mesh.getObjectByName("__PATTERN_OVERLAY__");
@@ -453,7 +474,6 @@ function applyPatternToMesh(args: {
   pan?: PatternTransform;
   worldBBox?: THREE.Box3 | null;
 
-  // ✅ NEW
   patternBrightness?: number; // 0..1
   patternOpacity?: number; // 0..1
 }) {
@@ -461,13 +481,16 @@ function applyPatternToMesh(args: {
 
   clearPatternOverlay(targetMesh);
 
-  if (!isPatternEnabled) return () => { };
+  if (!isPatternEnabled) return () => {};
 
   const p = pan ?? { x: 0.5, y: 0.5, zoom: 1 };
 
   const tex = patternTex.clone();
   tex.colorSpace = THREE.SRGBColorSpace;
-  (tex as any).flipY = false;
+  tex.flipY = false;
+
+  // ✅ ช่วยลด “ขอบดำ” ใน PNG โปร่งใสบางเคส
+  (tex as any).premultiplyAlpha = true;
   tex.needsUpdate = true;
 
   const img: any = (tex as any).image;
@@ -503,24 +526,20 @@ function applyPatternToMesh(args: {
     tex.needsUpdate = true;
   }
 
-  // ✅ คุมความสว่าง/ทึบ
   const brightness = clamp01(args.patternBrightness ?? 0.75);
   const opacity = clamp01(args.patternOpacity ?? 1);
 
-  // ✅ ใช้ StandardMaterial เพื่อ “รับแสง” เหมือนชิ้นงาน
+  // ✅ ใช้ MeshBasicMaterial + toneMapped=false → สีลายใกล้ preview และไม่โดนสีพื้นทับ
   const overlayMat = new THREE.MeshBasicMaterial({
     map: tex,
     transparent: true,
     opacity,
-    alphaTest: 0.01,
+    alphaTest: 0.01, // กันขอบดำของ PNG โปร่งใส
     depthTest: true,
     depthWrite: false,
   });
 
-  // ✅ ให้ไม่ผ่าน tone mapping → สีใกล้ preview มาก
   (overlayMat as any).toneMapped = false;
-
-  // ✅ ถ้าจะคุมความสว่าง ก็ทำได้ (1 = ปกติ)
   overlayMat.color = new THREE.Color(brightness, brightness, brightness);
 
   overlayMat.polygonOffset = true;
@@ -533,13 +552,12 @@ function applyPatternToMesh(args: {
 
   targetMesh.add(overlay);
 
-
   return () => {
     overlay.parent?.remove(overlay);
     try {
       overlayMat.dispose();
       tex.dispose();
-    } catch { }
+    } catch {}
   };
 }
 
@@ -566,7 +584,6 @@ function PlugScene({
   onLogoTransformChange?: (t: LogoTransform) => void;
   patternTransform?: PatternTransform;
 
-  // ✅ NEW
   patternBrightness?: number;
   patternOpacity?: number;
 
@@ -581,11 +598,11 @@ function PlugScene({
   const [patternMesh, setPatternMesh] = useState<THREE.Mesh | null>(null);
   const [patternSideMesh, setPatternSideMesh] = useState<THREE.Mesh | null>(null);
 
+  // ✅ world bbox สำหรับ “ต่อผืนเดียว”
   const patternWorldBBox = useMemo(() => {
     const wantsWorld =
       config.patternDecal?.uvSpace === "world" || config.patternSideDecal?.uvSpace === "world";
     if (!wantsWorld) return null;
-
     return computePatternWorldBBox(scene, config.patternWorldBBoxMeshes);
   }, [
     scene,
@@ -725,11 +742,11 @@ function PlugScene({
     logoUrl,
     logoTransform
       ? {
-        x: logoTransform.x,
-        y: logoTransform.y,
-        scale: Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale,
-        rot: logoTransform.rot,
-      }
+          x: logoTransform.x,
+          y: logoTransform.y,
+          scale: Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale,
+          rot: logoTransform.rot,
+        }
       : undefined
   );
 
@@ -744,7 +761,7 @@ function PlugScene({
     applyColorsByTargets(scene, config.colorTargets, colors);
   }, [scene, config.colorTargets, colors]);
 
-  // ✅ ลายหน้า (overlay + รับแสง)
+  // ✅ ลายหน้า (overlay กันสีทับ + ปรับสว่าง/ทึบ)
   useEffect(() => {
     const targetMesh = patternMesh ?? logoMesh;
     if (!targetMesh) return;
@@ -835,7 +852,6 @@ function PlugScene({
 
     const enabled = config.patternSideDecal?.enablePattern ?? true;
     if (enabled) return;
-
     if (!isPatternEnabled) return;
 
     const img: any = (patternTex as any)?.image;
@@ -862,16 +878,10 @@ function PlugScene({
       cloned.forEach((m: any) => {
         try {
           m?.dispose?.();
-        } catch { }
+        } catch {}
       });
     };
-  }, [
-    patternSideMesh,
-    config.id,
-    config.patternSideDecal?.enablePattern,
-    isPatternEnabled,
-    patternTex,
-  ]);
+  }, [patternSideMesh, config.id, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
   // โลโก้ overlay
   useEffect(() => {
@@ -959,14 +969,7 @@ function PlugScene({
   };
 
   const onPointerMove = (e: any) => {
-    if (
-      !dragLogoMode ||
-      !draggingRef.current ||
-      !logoUrl ||
-      !logoMesh ||
-      !logoTransform ||
-      !onLogoTransformChange
-    )
+    if (!dragLogoMode || !draggingRef.current || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange)
       return;
     if (e?.object !== logoMesh) return;
 
@@ -1048,7 +1051,11 @@ export default function Plug3D({
           glRef={glRef}
           cameraRef={cameraRef}
         />
-        <Environment preset="apartment" environmentIntensity={0.18} />
+
+        {/* ✅ กัน crash ถ้า preset HDR fetch ไม่ได้ */}
+        <EnvErrorBoundary>
+          <Environment preset="apartment" environmentIntensity={0.18} />
+        </EnvErrorBoundary>
       </Suspense>
 
       <OrbitControls
