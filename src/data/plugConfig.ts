@@ -26,16 +26,21 @@ export type DecalConfig = {
   // ✅ สำหรับ "ลาย" บางชิ้น ไม่ต้องแปะลาย (เช่น TYPE-2 Top_Side)
   enablePattern?: boolean; // default = true
 
-  // ✅ NEW: หมุนลาย (rad) ใช้กับ pattern overlay เท่านั้น
-  // ใส่เฉพาะ patternDecal/patternSideDecal (ไม่ใส่ = ไม่กระทบของเดิม)
+  // ✅ หมุนลาย (rad) ใช้กับ pattern overlay เท่านั้น
   patternRotation?: number; // เช่น -Math.PI/2 หรือ Math.PI/2
+
+  // ✅ NEW: เปิดโหมด Triplanar (กันยืดทุกมุม) — ใช้กับ "ลาย" เท่านั้น
+  useTriplanar?: boolean; // default = false
+
+  // ✅ NEW: กัน “แกนเอียง/แกนไม่ตรง” โดยล็อคแกน world จาก ref mesh
+  worldAlign?: boolean; // default = true
 };
 
 // ✅ ตัวเลือกสำหรับ TRIPLANAR (ใช้กับ "ลาย" เท่านั้น)
 export type PatternTriplanarConfig = {
-  scale?: number; // ความถี่ลาย
-  blend?: number; // ความนุ่มการ blend
-  seed?: number; // ความสุ่ม
+  scale?: number; // ความถี่ลาย (ยิ่งมากลายยิ่งถี่)
+  blend?: number; // ความนุ่มรอยต่อ (ยิ่งมากยิ่งเนียน)
+  seed?: number; // เผื่ออนาคต (ตอนนี้ยังไม่ใช้)
 };
 
 export type PlugModelConfig = {
@@ -44,22 +49,14 @@ export type PlugModelConfig = {
 
   colorTargets: Partial<Record<ColorKey, string[]>>;
 
-  // โลโก้
   decal: DecalConfig;
 
-  // ลาย "หน้าหลัก"
   patternDecal?: DecalConfig;
-
-  // ลาย "ด้านข้าง"
   patternSideDecal?: DecalConfig;
 
-  // ปรับ triplanar ต่อรุ่น
   patternTriplanar?: PatternTriplanarConfig;
 
-  // mesh ที่ใช้คำนวณ bbox สำหรับ “ผืนเดียว”
   patternWorldBBoxMeshes?: string[];
-
-  // ✅ ให้ world UV “ตรง” ตามแนวชิ้นงาน (กันลายเอียง/ไหล)
   patternWorldRefMesh?: string;
 };
 
@@ -94,6 +91,7 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       flipU: false,
       flipV: true,
       uvSpace: "local",
+      useTriplanar: false,
     },
   },
 
@@ -107,13 +105,9 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       switch: ["mat_swit", "Swit"],
     },
 
-    // ใช้คำนวณ bbox สำหรับ world cover ของ Top_Front
-    patternWorldBBoxMeshes: ["Top_Front", "Top_Side"],
-
-    // อ้างอิงแนวชิ้นงาน เพื่อกัน "ลายเอียง/ไหลลง"
+    patternWorldBBoxMeshes: ["Top_Front"],
     patternWorldRefMesh: "Top_Front",
 
-    // โลโก้ (local)
     decal: {
       meshName: "Top_Front",
       position: [0, 0, 0.002],
@@ -125,25 +119,23 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       uvSpace: "local",
     },
 
-    // ✅ ลายหน้า: ใช้ world + align (กันเอียง) + ใช้แกน XY (กันบีบ/ซูมเพี้ยน)
-    // ✅ หมุนลาย -90° เพื่อให้ “ตรงทิศ” (จากที่มันตั้งเป็นแนวยาว)
     patternDecal: {
       meshName: "Top_Front",
       position: [0, 0, 0.002],
       rotation: [0, 0, 0],
       scale: 0.35,
 
-      uvProjection: "YZ",   // ✅ แนะนำเริ่มจาก YZ
+      uvProjection: "YZ",
       flipU: false,
       flipV: false,
-
       forceUV: true,
       uvSpace: "world",
 
+      useTriplanar: true,
       patternRotation: -Math.PI / 2,
+      worldAlign: true,
     },
 
-    // Top_Side: ไม่แปะลายแล้ว (สีพื้นตามโทนเฉลี่ยของลาย คำนวณใน Plug3D)
     patternSideDecal: {
       meshName: "Top_Side",
       position: [0, 0, 0.002],
@@ -158,7 +150,85 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       lockAxes: true,
       uvSpace: "world",
 
-      enablePattern: false, // ✅ ปิดการแปะลายด้านข้าง
+      enablePattern: false,
+      worldAlign: true,
+    },
+
+    patternTriplanar: {
+      scale: 2.5,
+      blend: 6.0,
+      seed: 1.0,
+    },
+  },
+
+  // ==========================================================
+  // ✅ TYPE-3 (FIX: แกนลายไม่เอียง + ไม่บีบยืด)
+  // ==========================================================
+  "TYPE-3": {
+    id: "TYPE-3",
+    modelPath: "/models/plug/Un3.glb",
+
+    colorTargets: {
+      top: ["Top_Front", "Top_Side", "mat_top_Front", "mat_top_Side"],
+      bottom: ["Bottom", "mat_bottom"],
+    },
+
+    patternWorldBBoxMeshes: ["Top_Front"],
+    patternWorldRefMesh: "Top_Front",
+
+    decal: {
+      meshName: "Top_Front",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 0],
+      scale: [0.08, 0.08, 0.08],
+      uvProjection: "XZ",
+      flipU: false,
+      flipV: true,
+      uvSpace: "local",
+    },
+
+    patternDecal: {
+      meshName: "Top_Front",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 0],
+      scale: 0.35,
+
+      uvProjection: "XZ",
+      uvSpace: "world",
+      forceUV: true,
+
+      // ✅ FIX: ล็อคแกน world ไม่ให้ auto-swap (กัน skew ตอนหมุนองศาอื่น)
+      lockAxes: true,
+
+      flipU: false,
+      flipV: true,
+
+      // ✅ FIX: ไม่ใส่ rotation เริ่มต้นใน config (กัน double-rotation)
+      // ให้หมุนด้วยปุ่ม UI เท่านั้น
+      patternRotation: 0,
+
+      enablePattern: true,
+      worldAlign: true,
+    },
+
+    patternSideDecal: {
+      meshName: "Top_Side",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 0],
+      scale: 0.35,
+
+      uvProjection: "XZ",
+      flipU: true,
+      flipV: false,
+
+      uvSpace: "world",
+      forceUV: true,
+
+      // ✅ FIX: ล็อคแกนเช่นกัน
+      lockAxes: true,
+
+      enablePattern: false,
+      worldAlign: true,
     },
 
     patternTriplanar: {

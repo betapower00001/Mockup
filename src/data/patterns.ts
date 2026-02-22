@@ -35,16 +35,21 @@ const patterns: Record<string, PatternItem[]> = {
   ],
 
   "TYPE-2": [
-   {
-       id: "t2-test1",
-       name: "TYPE-2 Test 1",
-       preview: "/patterns/TYPE-1/test2.png",
-       img: "/patterns/TYPE-1/test2.png",
-     },
+    {
+      id: "t2-test1",
+      name: "TYPE-2 Test 1",
+      preview: "/patterns/TYPE-1/test2.png",
+      img: "/patterns/TYPE-1/test2.png",
+    },
   ],
 
   "TYPE-3": [
-    // ใส่ลายของ TYPE-3
+    {
+      id: "t2-test1",
+      name: "TYPE-2 Test 1",
+      preview: "/patterns/TYPE-1/test2.png",
+      img: "/patterns/TYPE-1/test2.png",
+    },
   ],
 
   "TYPE-4": [
