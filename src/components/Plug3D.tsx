@@ -49,7 +49,7 @@ class EnvErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
-  componentDidCatch() {}
+  componentDidCatch() { }
   render() {
     if (this.state.hasError) return null;
     return this.props.children;
@@ -442,7 +442,7 @@ function ensureWorldPlanarUV(args: {
   (geo.getAttribute("uv") as THREE.BufferAttribute).needsUpdate = true;
 }
 
-// ----------------------------------------------------------------------------------
+
 function applyFitWithPanOnSurface(
   tex: THREE.Texture,
   texW: number,
@@ -452,7 +452,8 @@ function applyFitWithPanOnSurface(
   pan?: PatternTransform,
   mode: "contain" | "cover" | "fixed" = "contain",
   minRepeat: number = 0,
-  rotationRad: number = 0
+  rotationRad: number = 0,
+  stableRotate: boolean = false
 ) {
   const EPS = 1e-6;
 
@@ -461,85 +462,62 @@ function applyFitWithPanOnSurface(
   const sU = Math.max(EPS, Math.abs(surfaceU));
   const sV = Math.max(EPS, Math.abs(surfaceV));
 
-  // 90° หรือ 270°
-  const isRotated90 = Math.abs(Math.cos(rotationRad)) < 0.1;
-
-  // ✅ “ภาพที่เห็น” หลังหมุน: สลับ W/H เพื่อคำนวณสัดส่วน
-  const imgW = isRotated90 ? tH : tW;
-  const imgH = isRotated90 ? tW : tH;
-
-  const texAspect = imgW / imgH;
-  const surfAspect = sU / sV;
-
-  let repX = 1;
-  let repY = 1;
-
-  if (mode === "fixed") {
-    repX = 1;
-    repY = 1;
-  } else if (mode === "cover") {
-    if (surfAspect >= texAspect) {
-      repY = 1;
-      repX = surfAspect / texAspect;
-    } else {
-      repX = 1;
-      repY = texAspect / surfAspect;
-    }
-  } else {
-    // ✅ contain
-    if (surfAspect >= texAspect) {
-      repX = 1;
-      repY = texAspect / surfAspect;
-    } else {
-      repY = 1;
-      repX = surfAspect / texAspect;
-    }
-  }
-
-  // Zoom
-  const zoom = Math.max(0.01, pan?.zoom ?? 1);
-  repX *= zoom;
-  repY *= zoom;
-
-  if (minRepeat > 0) {
-    repX = Math.max(repX, minRepeat);
-    repY = Math.max(repY, minRepeat);
-  }
-
-  // ✅ สำคัญมาก: เมื่อ texture ถูกหมุน 90° แกน U/V จะสลับกันในทางปฏิบัติ
-  // ถ้าไม่สลับ repeat จะ “ดูยืด”
-  if (isRotated90) {
-    const tmp = repX;
-    repX = repY;
-    repY = tmp;
-  }
-
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(repX, repY);
-
-  // Pan offset
   const px = pan?.x ?? 0.5;
   const py = pan?.y ?? 0.5;
+  const zoom = Math.max(0.01, pan?.zoom ?? 1);
 
-  let offsetX = 0;
-  let offsetY = 0;
+  const c = Math.abs(Math.cos(rotationRad));
+  const s = Math.abs(Math.sin(rotationRad));
+  const rotW = tW * c + tH * s;
+  const rotH = tW * s + tH * c;
 
-  if (isRotated90) {
-    if (Math.sin(rotationRad) < 0) {
-      // -90
-      offsetX = (py - 0.5) * repX;
-      offsetY = (0.5 - px) * repY;
-    } else {
-      // +90
-      offsetX = (0.5 - py) * repX;
-      offsetY = (px - 0.5) * repY;
-    }
+  let scale = 1;
+
+  if (stableRotate) {
+    // ✅ FIX สำหรับ TYPE-3: 
+    // บังคับคำนวณจาก "เส้นทแยงมุม" (Diagonal) และ "บังคับ Cover" เสมอ!
+    // เพื่อให้ลายใหญ่พอที่จะคลุมปลั๊กมิดทุกองศา ไม่มีขอบแหว่ง และไม่มีการขึ้นลายซ้ำเด็ดขาด
+    const diag = Math.sqrt(sU * sU + sV * sV);
+    scale = Math.max(diag / tW, diag / tH);
   } else {
-    offsetX = (0.5 - px) * repX;
-    offsetY = (py - 0.5) * repY;
+    // ✅ สำหรับ TYPE-1, TYPE-2: 
+    // ใช้สมการไดนามิกเดิมของคุณที่บอกว่าทำงานได้ดีที่สุดแล้ว (เก็บไว้ 100% ไม่แตะต้อง)
+    if (mode === "cover") {
+      if (sU / sV > rotW / rotH) {
+        scale = sU / rotW;
+      } else {
+        scale = sV / rotH;
+      }
+    } else {
+      if (sU / sV > rotW / rotH) {
+        scale = sV / rotH;
+      } else {
+        scale = sU / rotW;
+      }
+    }
   }
 
-  tex.offset.set(offsetX, offsetY);
+  // ปรับ Scale ตาม Slider ซูม
+  scale /= zoom;
+
+  // จัดการ minRepeat ป้องกันลายขยายใหญ่เกินไป
+  if (minRepeat > 0) {
+    const maxScaleX = sU / (rotW * minRepeat);
+    const maxScaleY = sV / (rotH * minRepeat);
+    scale = Math.min(scale, maxScaleX, maxScaleY);
+  }
+
+  // บังคับใช้ Matrix ป้องกันการบีบยืด และให้การเลื่อน Pan ตรงตามแกน 3D เสมอ
+  tex.matrixAutoUpdate = false;
+  tex.matrix.identity()
+    .translate(-0.5, -0.5)
+    .scale(sU, sV) // แปลงเป็นหน่วย Physical
+    .rotate(rotationRad) // หมุนภาพ
+    .scale(1 / (tW * scale), 1 / (tH * scale)) // ดึงภาพกลับเข้ากรอบให้พอดี (Fit)
+    .translate(0.5 - px, 0.5 - py) // เลื่อนตำแหน่ง Slider
+    .translate(0.5, 0.5);
+
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.needsUpdate = true;
 }
 
@@ -585,11 +563,12 @@ function applyPatternToMesh(args: {
   fitMode?: "contain" | "cover";
   minRepeat?: number;
   lockAxes?: boolean;
+  stableRotate?: boolean; // ✅ NEW
 }) {
   const { targetMesh, patternTex, isPatternEnabled, axes, pan, worldBBox, alignMatrix } = args;
 
   clearPatternOverlay(targetMesh);
-  if (!isPatternEnabled) return () => {};
+  if (!isPatternEnabled) return () => { };
 
   const p = pan ?? { x: 0.5, y: 0.5, zoom: 1 };
   const fitMode = args.fitMode ?? "contain";
@@ -638,7 +617,18 @@ function applyPatternToMesh(args: {
       }
 
       const { du, dv } = getDuDvFromWorldBox(bb, activeAxes);
-      applyFitWithPanOnSurface(tex, baseW, baseH, du, dv, p, fitMode, minRepeat, rot);
+      applyFitWithPanOnSurface(
+        tex,
+        baseW,
+        baseH,
+        du,
+        dv,
+        p,
+        fitMode,
+        minRepeat,
+        rot,
+        !!args.stableRotate
+      );
     } else {
       const geo = targetMesh.geometry as THREE.BufferGeometry;
       geo.computeBoundingBox();
@@ -667,7 +657,18 @@ function applyPatternToMesh(args: {
         const surfaceU = activeAxes === "XY" ? sx : activeAxes === "XZ" ? sx : sy;
         const surfaceV = activeAxes === "XY" ? sy : activeAxes === "XZ" ? sz : sz;
 
-        applyFitWithPanOnSurface(tex, baseW, baseH, surfaceU, surfaceV, p, fitMode, minRepeat, rot);
+        applyFitWithPanOnSurface(
+          tex,
+          baseW,
+          baseH,
+          surfaceU,
+          surfaceV,
+          p,
+          fitMode,
+          minRepeat,
+          rot,
+          !!args.stableRotate
+        );
       }
     }
 
@@ -712,7 +713,7 @@ function applyPatternToMesh(args: {
       removeLoadListener = () => {
         try {
           img.removeEventListener("load", onLoad);
-        } catch {}
+        } catch { }
       };
     }
     tryApplyWhenReady();
@@ -750,7 +751,7 @@ function applyPatternToMesh(args: {
       removeLoadListener?.();
       overlayMat.dispose();
       tex.dispose();
-    } catch {}
+    } catch { }
   };
 }
 
@@ -808,6 +809,17 @@ function PlugScene({
     return getWorldAlignMatrixFromRef(scene, config.patternWorldRefMesh);
   }, [scene, wantsWorld, config.patternWorldRefMesh]);
 
+  // ✅ FIX: รวม TYPE-2 และ TYPE-3 เข้าด้วยกัน เพื่อให้ได้รับฟีเจอร์ "ล็อคแกน+กันยืด" ทั้งคู่
+  const isFixedType = config.id === "TYPE-2" || config.id === "TYPE-3";
+
+  // เลือกแกน world จาก bbox หลัง align เพื่อกันยืด + ให้คงที่
+  const fixedWorldAxes = useMemo<UVProjection | null>(() => {
+    if (!isFixedType) return null;
+    if (!patternWorldBBox) return null;
+    const bb = patternWorldAlign ? transformBox3(patternWorldBBox, patternWorldAlign) : patternWorldBBox;
+    return pickBestAxesFromWorldBox(bb);
+  }, [isFixedType, patternWorldBBox, patternWorldAlign]);
+
   useEffect(() => {
     const m = findMeshByName(scene, config.decal.meshName);
     if (m) {
@@ -836,12 +848,14 @@ function PlugScene({
     const pm = findMeshByName(scene, meshName);
 
     if (pm && config.patternDecal) {
-      const axes = (config.patternDecal.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
+      let axes = (config.patternDecal.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
       const fu = config.patternDecal.flipU ?? config.decal.flipU;
       const fv = config.patternDecal.flipV ?? config.decal.flipV;
       const space: UVSpace = config.patternDecal.uvSpace ?? "local";
 
       if (space === "world" && patternWorldBBox) {
+        if (isFixedType && fixedWorldAxes) axes = fixedWorldAxes;
+
         ensureWorldPlanarUV({
           mesh: pm,
           axes,
@@ -850,7 +864,7 @@ function PlugScene({
           flipU: fu,
           flipV: fv,
           alignMatrix: patternWorldAlign,
-          lockAxes: config.patternDecal.lockAxes,
+          lockAxes: isFixedType ? true : config.patternDecal.lockAxes,
         });
       } else {
         ensurePlanarUV(pm, axes, fu, fv, config.patternDecal.forceUV ?? false, config.patternDecal.lockAxes);
@@ -859,6 +873,7 @@ function PlugScene({
     setPatternMesh(pm);
   }, [
     scene,
+    isFixedType,
     config.decal.meshName,
     config.decal.uvProjection,
     config.decal.flipU,
@@ -872,6 +887,7 @@ function PlugScene({
     config.patternDecal?.uvSpace,
     patternWorldBBox,
     patternWorldAlign,
+    fixedWorldAxes,
   ]);
 
   useEffect(() => {
@@ -879,15 +895,18 @@ function PlugScene({
     const sm = sideName ? findMeshByName(scene, sideName) : null;
 
     if (sm && config.patternSideDecal) {
-      const axes = (config.patternSideDecal.uvProjection ??
+      let axes = (config.patternSideDecal.uvProjection ??
         config.patternDecal?.uvProjection ??
         config.decal.uvProjection ??
         "XZ") as UVProjection;
+
       const fu = config.patternSideDecal.flipU ?? config.patternDecal?.flipU ?? config.decal.flipU;
       const fv = config.patternSideDecal.flipV ?? config.patternDecal?.flipV ?? config.decal.flipV;
       const space: UVSpace = config.patternSideDecal.uvSpace ?? "local";
 
       if (space === "world" && patternWorldBBox) {
+        if (isFixedType && fixedWorldAxes) axes = fixedWorldAxes;
+
         ensureWorldPlanarUV({
           mesh: sm,
           axes,
@@ -896,15 +915,17 @@ function PlugScene({
           flipU: fu,
           flipV: fv,
           alignMatrix: patternWorldAlign,
-          lockAxes: config.patternSideDecal.lockAxes,
+          lockAxes: isFixedType ? true : config.patternSideDecal.lockAxes,
         });
       } else {
         ensurePlanarUV(sm, axes, fu, fv, config.patternSideDecal.forceUV ?? false, config.patternSideDecal.lockAxes);
       }
     }
+
     setPatternSideMesh(sm);
   }, [
     scene,
+    isFixedType,
     config.patternSideDecal?.meshName,
     config.patternSideDecal?.uvProjection,
     config.patternSideDecal?.flipU,
@@ -920,17 +941,18 @@ function PlugScene({
     config.decal.flipV,
     patternWorldBBox,
     patternWorldAlign,
+    fixedWorldAxes,
   ]);
 
   const stickerTex = useStickerTexture(
     logoUrl,
     logoTransform
       ? {
-          x: logoTransform.x,
-          y: logoTransform.y,
-          scale: Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : (logoTransform.scale as any),
-          rot: logoTransform.rot,
-        }
+        x: logoTransform.x,
+        y: logoTransform.y,
+        scale: Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : (logoTransform.scale as any),
+        rot: logoTransform.rot,
+      }
       : undefined
   );
 
@@ -950,18 +972,19 @@ function PlugScene({
     const targetMesh = patternMesh ?? logoMesh;
     if (!targetMesh) return;
 
-    const axes = (config.patternDecal?.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
+    let axes = (config.patternDecal?.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
     const pan = patternTransform ?? { x: 0.5, y: 0.5, zoom: 1 };
     const wantsWorldMain = config.patternDecal?.uvSpace === "world";
 
     const rot =
-      (patternRotation !== undefined ? patternRotation : undefined) ??
-      (config.patternDecal as any)?.patternRotation ??
-      0;
+      (patternRotation !== undefined ? patternRotation : undefined) ?? (config.patternDecal as any)?.patternRotation ?? 0;
 
-    // ✅ FIX: main ต้องใช้ contain เป็น default (ไม่บังคับ cover)
     const fitMode = patternFitMode ?? "contain";
     const minRepeat = 0;
+
+    if (wantsWorldMain && patternWorldBBox && isFixedType && fixedWorldAxes) {
+      axes = fixedWorldAxes;
+    }
 
     return applyPatternToMesh({
       targetMesh,
@@ -976,7 +999,8 @@ function PlugScene({
       rotationRad: rot,
       fitMode,
       minRepeat,
-      lockAxes: config.patternDecal?.lockAxes,
+      lockAxes: isFixedType ? true : config.patternDecal?.lockAxes,
+      stableRotate: isFixedType, // ✅ เปิดใช้งานสมการ Diagonal คลุมมิดให้ TYPE-2 ด้วย
     });
   }, [
     logoMesh,
@@ -990,7 +1014,7 @@ function PlugScene({
     patternBrightness,
     patternOpacity,
     patternFitMode,
-    config.id,
+    isFixedType,
     config.decal.uvProjection,
     config.patternDecal?.uvProjection,
     config.patternDecal?.uvSpace,
@@ -998,31 +1022,40 @@ function PlugScene({
     patternWorldBBox,
     patternWorldAlign,
     config.patternDecal?.lockAxes,
+    fixedWorldAxes,
   ]);
 
   // apply pattern side
   useEffect(() => {
+    const sideCfg = config.patternSideDecal;
     if (!patternSideMesh) return;
+    if (!sideCfg) return;
 
-    const enabled = config.patternSideDecal?.enablePattern ?? true;
+    const enabled = sideCfg.enablePattern ?? true;
     if (!enabled) {
       clearPatternOverlay(patternSideMesh);
       return;
     }
 
-    const axes = (config.patternSideDecal?.uvProjection ??
+    let axes = (sideCfg.uvProjection ??
       config.patternDecal?.uvProjection ??
       config.decal.uvProjection ??
       "XZ") as UVProjection;
+
     const pan = patternTransform ?? { x: 0.5, y: 0.5, zoom: 1 };
-    const wantsWorldSide = config.patternSideDecal?.uvSpace === "world";
+    const wantsWorldSide = sideCfg.uvSpace === "world";
 
     const rot =
       (patternRotation !== undefined ? patternRotation : undefined) ??
-      (config.patternSideDecal as any)?.patternRotation ??
+      (sideCfg as any)?.patternRotation ??
       (config.patternDecal as any)?.patternRotation ??
       0;
+
     const fitMode = patternFitMode ?? "contain";
+
+    if (wantsWorldSide && patternWorldBBox && isFixedType && fixedWorldAxes) {
+      axes = fixedWorldAxes;
+    }
 
     return applyPatternToMesh({
       targetMesh: patternSideMesh,
@@ -1036,7 +1069,8 @@ function PlugScene({
       patternOpacity,
       rotationRad: rot,
       fitMode,
-      lockAxes: config.patternSideDecal?.lockAxes,
+      lockAxes: isFixedType ? true : sideCfg.lockAxes,
+      stableRotate: isFixedType, // ✅ เปิดให้ TYPE-2 ด้วย
     });
   }, [
     patternSideMesh,
@@ -1049,18 +1083,16 @@ function PlugScene({
     patternBrightness,
     patternOpacity,
     patternFitMode,
-    config.patternSideDecal?.uvProjection,
-    config.patternSideDecal?.uvSpace,
-    config.patternSideDecal?.enablePattern,
-    (config.patternSideDecal as any)?.patternRotation,
-    (config.patternDecal as any)?.patternRotation,
+    isFixedType,
+    config.patternSideDecal,
     config.patternDecal?.uvProjection,
-    config.decal.uvProjection,
+    (config.patternDecal as any)?.patternRotation,
     patternWorldBBox,
     patternWorldAlign,
-    config.patternSideDecal?.lockAxes,
+    fixedWorldAxes,
   ]);
 
+  // side enabled=false -> tint material
   useEffect(() => {
     if (!patternSideMesh) return;
 
@@ -1089,11 +1121,12 @@ function PlugScene({
       cloned.forEach((m: any) => {
         try {
           m?.dispose?.();
-        } catch {}
+        } catch { }
       });
     };
   }, [patternSideMesh, config.id, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
+  // logo overlay
   useEffect(() => {
     if (!logoMesh) return;
 
@@ -1130,6 +1163,7 @@ function PlugScene({
     };
   }, [logoMesh, stickerTex, logoUrl]);
 
+  // render
   useEffect(() => {
     if (!onRenderReady) return;
 
@@ -1268,7 +1302,13 @@ export default function Plug3D({
         </EnvErrorBoundary>
       </Suspense>
 
-      <OrbitControls makeDefault ref={controlsRef} enablePan={!lockControls} enableZoom={!lockControls} enableRotate={!lockControls} />
+      <OrbitControls
+        makeDefault
+        ref={controlsRef}
+        enablePan={!lockControls}
+        enableZoom={!lockControls}
+        enableRotate={!lockControls}
+      />
     </Canvas>
   );
 }
