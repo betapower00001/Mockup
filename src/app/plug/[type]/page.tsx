@@ -2,14 +2,12 @@ import { notFound } from "next/navigation";
 import plugTypes from "@/data/plugTypes";
 import PlugCustomizer from "@/components/PlugCustomizer";
 
-interface PageProps {
-  params: { type?: string };
-}
+type PageProps = {
+  params: Promise<{ type: string }>;
+};
 
-export default function PlugMainCustomizerPage({ params }: PageProps) {
-  const { type } = params;
-
-  if (!type) return notFound();
+export default async function PlugMainCustomizerPage({ params }: PageProps) {
+  const { type } = await params;
 
   const plug = plugTypes.find((p) => p.id === type);
   if (!plug) return notFound();
