@@ -128,14 +128,15 @@ export default function PlugCustomizer({ plugId }: Props) {
   );
 
   // ✅ FIX (ไม่กระทบส่วนอื่น):
-  // ส่ง switchColor เฉพาะรุ่นที่มีสวิตช์จริง (ไม่ใช่ TYPE-1)
+  // ส่ง switchColor เฉพาะรุ่นที่มีสวิตช์จริง (ไม่ใช่ TYPE-1 และ TYPE-3)
   const safeColors = useMemo(() => {
     const out: Partial<Record<ColorKey, string>> = {
       top: normalizeHex(customization.topColor) ?? "",
       bottom: normalizeHex(customization.bottomColor) ?? "",
     };
 
-    if (selectedPlugId !== "TYPE-1") {
+    // ✅ TYPE-3 ไม่มีสวิตช์ -> ไม่ส่ง switch
+    if (selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3") {
       out.switch = normalizeHex(customization.switchColor) ?? "";
     }
 
@@ -159,14 +160,14 @@ export default function PlugCustomizer({ plugId }: Props) {
   function resetPattern() {
     patchCustomization({ patternUrl: "" });
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
-    setPatternRotation(0); // ✅ ADD
+    setPatternRotation(0);
   }
 
   function resetAll() {
     patchCustomization({ patternUrl: "", logoUrl: undefined });
     setLogoTransform(DEFAULT_LOGO_TRANSFORM);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
-    setPatternRotation(0); // ✅ ADD
+    setPatternRotation(0);
     setDragLogoMode(false);
   }
 
@@ -179,7 +180,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     setUploadedPatterns((prev) => [base64, ...prev]);
     patchCustomization({ patternUrl: base64 });
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
-    setPatternRotation(0); // ✅ ADD
+    setPatternRotation(0);
     setStep("pattern");
   }
 
@@ -196,7 +197,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     patchCustomization({ patternUrl: "", logoUrl: undefined });
     setLogoTransform(DEFAULT_LOGO_TRANSFORM);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
-    setPatternRotation(0); // ✅ ADD
+    setPatternRotation(0);
     setDragLogoMode(false);
     setUploadedPatterns([]);
     setStep("color");
@@ -241,11 +242,7 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="hint">ปรับสีส่วนประกอบหลักของชิ้นงาน</div>
 
           <div style={{ marginTop: 10 }}>
-            <ColorPicker
-              label="ฝาบน"
-              initialColor={customization.topColor}
-              onColorChange={(c) => patchCustomization({ topColor: c })}
-            />
+            <ColorPicker label="ฝาบน" initialColor={customization.topColor} onColorChange={(c) => patchCustomization({ topColor: c })} />
             <div style={{ height: 10 }} />
             <ColorPicker
               label="ฝาล่าง"
@@ -253,8 +250,8 @@ export default function PlugCustomizer({ plugId }: Props) {
               onColorChange={(c) => patchCustomization({ bottomColor: c })}
             />
 
-            {/* ✅ ซ่อนสวิตช์สำหรับ TYPE-1 */}
-            {selectedPlugId !== "TYPE-1" && (
+            {/* ✅ ซ่อนสวิตช์สำหรับ TYPE-1 และ TYPE-3 */}
+            {selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && (
               <>
                 <div style={{ height: 10 }} />
                 <ColorPicker
@@ -277,7 +274,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               <div className="label">ลวดลาย (Pattern)</div>
               <div className="hint">เลือก/อัปโหลดลาย แล้วเลื่อนตำแหน่ง + ซูม + หมุน</div>
             </div>
-            <button type="button" className="btn" onClick={resetPattern} disabled={!hasPattern}>
+            <button type="button" className="btn btnGhost" onClick={resetPattern} disabled={!hasPattern}>
               ล้างลาย
             </button>
           </div>
@@ -304,7 +301,7 @@ export default function PlugCustomizer({ plugId }: Props) {
 
           <div style={{ opacity: hasPattern ? 1 : 0.45 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 12 }}>
-              {/* LEFT: sliders */}
+              {/* LEFT */}
               <div>
                 <Slider
                   label={`X: ${patternTransform.x.toFixed(2)}`}
@@ -336,7 +333,6 @@ export default function PlugCustomizer({ plugId }: Props) {
                   onChange={(v) => setPatternTransform((s) => ({ ...s, zoom: v }))}
                 />
 
-                {/* ✅ Quick controls row: Zoom + Rotate */}
                 <div className="row" style={{ marginTop: 10, gap: 8 }}>
                   <button
                     type="button"
@@ -358,7 +354,6 @@ export default function PlugCustomizer({ plugId }: Props) {
                   </button>
                 </div>
 
-                {/* ✅ Rotate controls (ใช้งานสะดวก) */}
                 <div className="divider" style={{ margin: "12px 0" }} />
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   <div>
@@ -373,54 +368,23 @@ export default function PlugCustomizer({ plugId }: Props) {
                 </div>
 
                 <div className="row" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="miniBtn"
-                    disabled={!hasPattern}
-                    onClick={() => rotatePattern(-Math.PI / 2)}
-                    title="หมุนซ้าย 90°"
-                  >
+                  <button type="button" className="miniBtn" disabled={!hasPattern} onClick={() => rotatePattern(-Math.PI / 2)} title="หมุนซ้าย 90°">
                     ↺90
                   </button>
-                  <button
-                    type="button"
-                    className="miniBtn"
-                    disabled={!hasPattern}
-                    onClick={() => rotatePattern(+Math.PI / 2)}
-                    title="หมุนขวา 90°"
-                  >
+                  <button type="button" className="miniBtn" disabled={!hasPattern} onClick={() => rotatePattern(+Math.PI / 2)} title="หมุนขวา 90°">
                     ↻90
                   </button>
-                  <button
-                    type="button"
-                    className="miniBtn"
-                    disabled={!hasPattern}
-                    onClick={() => rotatePattern(-degToRad(5))}
-                    title="หมุนซ้าย 5°"
-                  >
+                  <button type="button" className="miniBtn" disabled={!hasPattern} onClick={() => rotatePattern(-degToRad(5))} title="หมุนซ้าย 5°">
                     −5°
                   </button>
-                  <button
-                    type="button"
-                    className="miniBtn"
-                    disabled={!hasPattern}
-                    onClick={() => rotatePattern(+degToRad(5))}
-                    title="หมุนขวา 5°"
-                  >
+                  <button type="button" className="miniBtn" disabled={!hasPattern} onClick={() => rotatePattern(+degToRad(5))} title="หมุนขวา 5°">
                     +5°
                   </button>
-                  <button
-                    type="button"
-                    className="miniBtnWide"
-                    disabled={!hasPattern}
-                    onClick={() => setPatternRotation(0)}
-                    title="รีเซ็ตการหมุน"
-                  >
+                  <button type="button" className="miniBtnWide" disabled={!hasPattern} onClick={() => setPatternRotation(0)} title="รีเซ็ตการหมุน">
                     รีเซ็ตหมุน
                   </button>
                 </div>
 
-                {/* ✅ Rotation slider */}
                 <div style={{ marginTop: 10 }}>
                   <Slider
                     label={`องศา: ${rotationDeg}°`}
@@ -434,7 +398,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 </div>
               </div>
 
-              {/* RIGHT: nudge pad */}
+              {/* RIGHT */}
               <div>
                 <div className="label">เลื่อนละเอียด</div>
                 <div className="miniPad" style={{ marginTop: 8 }}>
@@ -490,7 +454,7 @@ export default function PlugCustomizer({ plugId }: Props) {
             </div>
             <div className="row" style={{ gap: 8 }}>
               <LogoUploader onSelect={handleLogoSelect} />
-              <button type="button" className="btn" disabled={!hasLogo} onClick={resetLogo}>
+              <button type="button" className="btn btnGhost" disabled={!hasLogo} onClick={resetLogo}>
                 รีเซ็ต
               </button>
             </div>
@@ -499,12 +463,7 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="divider" />
 
           <label className="row" style={{ gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={dragLogoMode}
-              disabled={!hasLogo}
-              onChange={(e) => setDragLogoMode(e.target.checked)}
-            />
+            <input type="checkbox" checked={dragLogoMode} disabled={!hasLogo} onChange={(e) => setDragLogoMode(e.target.checked)} />
             <span className="label" style={{ opacity: hasLogo ? 1 : 0.55 }}>
               โหมดลากโลโก้
             </span>
@@ -555,7 +514,6 @@ export default function PlugCustomizer({ plugId }: Props) {
       );
     }
 
-    // view step
     return (
       <div>
         <div className="label">มุมมอง</div>
@@ -563,13 +521,15 @@ export default function PlugCustomizer({ plugId }: Props) {
         <div style={{ marginTop: 10 }}>
           <LayoutPreview view={customization.view} onSetView={(v) => patchCustomization({ view: v })} onDownload={() => {}} />
         </div>
+
         <div className="divider" />
+
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div className="row" style={{ gap: 8 }}>
             <StatusBadge active={hasPattern} activeText="มีลาย" inactiveText="ไม่มีลาย" />
             <StatusBadge active={hasLogo} activeText="มีโลโก้" inactiveText="ไม่มีโลโก้" />
           </div>
-          <button type="button" className="btn" onClick={resetAll}>
+          <button type="button" className="btn btnDanger" onClick={resetAll}>
             รีเซ็ตทั้งหมด
           </button>
         </div>
@@ -589,7 +549,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <h3 className="title">Mockup</h3>
                 <p className="sub">แสดงตัวอย่างสินค้า 3D</p>
               </div>
-              <button type="button" className="btn" onClick={resetAll}>
+              <button type="button" className="btn btnDanger" onClick={resetAll}>
                 รีเซ็ตทั้งหมด
               </button>
             </div>
@@ -602,9 +562,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                   logoUrl={customization.logoUrl}
                   patternUrl={customization.patternUrl}
                   patternTransform={patternTransform}
-                  // ✅ NEW: ส่งมุมหมุนลาย
                   patternRotation={patternRotation}
-                  // ✅ FIX: ส่ง colors แบบปลอดภัย (TYPE-1 จะไม่โดน switch)
                   colors={safeColors}
                   logoTransform={logoTransform}
                   onLogoTransformChange={setLogoTransform}
@@ -636,11 +594,11 @@ export default function PlugCustomizer({ plugId }: Props) {
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <div className="row">
                   <LogoUploader onSelect={handleLogoSelect} />
-                  <button type="button" className="btn" onClick={resetLogo} disabled={!hasLogo}>
+                  <button type="button" className="btn btnGhost" onClick={resetLogo} disabled={!hasLogo}>
                     รีเซ็ตโลโก้
                   </button>
                 </div>
-                <button type="button" className="btn" onClick={resetPattern} disabled={!hasPattern}>
+                <button type="button" className="btn btnGhost" onClick={resetPattern} disabled={!hasPattern}>
                   ล้างลาย
                 </button>
               </div>
@@ -683,16 +641,16 @@ export default function PlugCustomizer({ plugId }: Props) {
               <div className="divider" />
 
               <div className="row" style={{ justifyContent: "space-between" }}>
-                <button type="button" className="btn" onClick={goBack} disabled={currentStepIdx === 0}>
+                <button type="button" className="btn btnGhost" onClick={goBack} disabled={currentStepIdx === 0}>
                   ← ย้อนกลับ
                 </button>
                 <button
                   type="button"
-                  className={`btn ${currentStepIdx === STEPS.length - 1 ? "" : "btnPrimary"}`}
+                  className={`btn ${currentStepIdx === STEPS.length - 1 ? "btnGhost" : "btnPrimary"}`}
                   onClick={goNext}
                   disabled={currentStepIdx === STEPS.length - 1}
                 >
-                  ถัดไป →{" "}
+                  ถัดไป →
                 </button>
               </div>
             </div>
@@ -716,8 +674,9 @@ function StatusBadge({
     <span
       className="badge"
       style={{
-        background: active ? "rgba(80,125,255,.12)" : "rgba(0,0,0,.04)",
-        color: active ? "#2d4be8" : "#374766",
+        background: active ? "rgba(59,130,246,.12)" : "rgba(15,23,42,.04)",
+        color: active ? "#1d4ed8" : "#0f172a",
+        borderColor: active ? "rgba(59,130,246,.25)" : "rgba(15,23,42,.10)",
       }}
     >
       {active ? activeText : inactiveText}
@@ -760,35 +719,259 @@ function Slider({
 }
 
 const CSS = `
-  .pc-wrap{ min-height: 100vh; background: radial-gradient(1200px 500px at 20% 0%, rgba(90,140,255,.12), transparent 60%), linear-gradient(#f7f9fc, #cc0773); padding: 14px; }
-  .pc-grid{ max-width: 1280px; margin: 0 auto; display: grid; gap: 12px; grid-template-columns: 1.62fr 1fr; align-items: start; }
+  /* =========================
+     Base layout / background
+  ========================= */
+  .pc-wrap{
+    min-height: 100vh;
+    padding: 14px;
+    background:
+      radial-gradient(900px 500px at 10% 0%, rgba(59,130,246,.22), transparent 60%),
+      radial-gradient(900px 500px at 90% 10%, rgba(168,85,247,.16), transparent 55%),
+      linear-gradient(180deg, #f7f9ff, #eef2ff 60%, #f8fafc);
+  }
+
+  .pc-grid{
+    max-width: 1280px;
+    margin: 0 auto;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: 1.62fr 1fr;
+    align-items: start;
+  }
+
   :root{ --mockH: 480px; }
   @media (max-height: 820px){ :root{ --mockH: 440px; } }
   @media (max-height: 740px){ :root{ --mockH: 400px; } }
-  @media (max-width: 1100px){ .pc-grid{ grid-template-columns: 1fr; } .sticky{ position: static !important; } }
-  .card{ background: rgba(255,255,255,.86); border: 1px solid rgba(220,226,240,.95); border-radius: 16px; box-shadow: 0 10px 26px rgba(30,55,90,.1); backdrop-filter: blur(10px); overflow: hidden; }
-  .head{ padding: 10px 12px; border-bottom: 1px solid rgba(230,235,245,.9); display:flex; justify-content:space-between; align-items:center; }
-  .title{ margin:0; font-size:14px; font-weight: 900; }
-  .sub{ margin:0; font-size:12px; opacity:.7; }
+  @media (max-width: 1100px){
+    .pc-grid{ grid-template-columns: 1fr; }
+    .sticky{ position: static !important; }
+  }
+
+  /* =========================
+     Card system
+  ========================= */
+  .card{
+    background: rgba(255,255,255,.94);
+    border: 1px solid rgba(226,232,240,.9);
+    border-radius: 18px;
+    box-shadow: 0 14px 34px rgba(15,23,42,.10);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+  }
+
+  .head{
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(226,232,240,.9);
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background: linear-gradient(180deg, rgba(248,250,252,.85), rgba(255,255,255,.75));
+  }
+
+  .title{ margin:0; font-size:14px; font-weight: 900; color:#0f172a; letter-spacing:.2px; }
+  .sub{ margin:0; font-size:12px; color:#334155; opacity: .9; }
+
   .body{ padding: 12px; }
-  .mock{ height: var(--mockH); border-radius: 14px; background: linear-gradient(180deg, #003a81, #edf2fb); border: 1px solid rgba(220,226,240,.9); overflow: hidden; }
+
+  .mock{
+    height: var(--mockH);
+    border-radius: 14px;
+    background: linear-gradient(180deg, #0b2447, #e8eefc);
+    border: 1px solid rgba(226,232,240,.9);
+    overflow: hidden;
+  }
+
+  /* =========================
+     Typography (FIX contrast)
+  ========================= */
+  .label{
+    font-size:12.5px;
+    font-weight: 900;
+    color:#0f172a;
+    letter-spacing: .2px;
+    text-shadow: 0 1px 0 rgba(255,255,255,.55);
+  }
+
+  .hint{
+    font-size:12px;
+    margin-top:6px;
+    color:#334155;
+    opacity: 1;
+  }
+
+  /* =========================
+     Common UI
+  ========================= */
   .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .btn{ padding: 7px 12px; border-radius: 12px; border: 1px solid rgba(210,218,235,.9); background: rgba(0, 17, 53, 0.9); color: white; cursor: pointer; font-weight: 800; transition: all .18s ease; }
-  .btnPrimary{ border: 1px solid rgba(55,110,255,.45); background: linear-gradient(180deg, rgba(85,135,255,.95), rgba(70,110,245,.95)); box-shadow: 0 10px 22px rgba(70,110,245,.22); }
-  .btn:disabled{ opacity:.45; cursor:not-allowed; }
-  .badge{ padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 900; border: 1px solid rgba(210,218,235,.9); }
-  .badgeSoft{ padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 900; background: rgba(0,0,0,.03); color: #374766; }
-  .divider{ height:1px; background: rgba(230,235,245,.9); margin:10px 0; }
-  .label{ font-size:12.5px; font-weight:900; color:#263455; }
-  .hint{ font-size:12px; opacity:.7; margin-top:6px; }
+  .divider{ height:1px; background: rgba(226,232,240,.9); margin:10px 0; }
   .sticky{ position: sticky; top: 12px; }
-  .patternScroll{ overflow: auto; padding-right: 6px; }
-  .miniPad{ display:grid; grid-template-columns: repeat(3, 34px); gap: 6px; justify-content: end; }
-  .miniBtn{ width:34px; height:34px; border-radius: 12px; border: 1px solid rgba(210,218,235,.9); background: rgba(0, 32, 136, 0.9); color: white; cursor:pointer; font-weight: 900; }
-  .miniBtnWide{ height:34px; border-radius: 12px; border: 1px solid rgba(210,218,235,.9); background: rgba(0, 32, 136, 0.9); color: white; cursor:pointer; font-weight: 900; padding: 0 12px; font-size: 12px; width: auto; }
+
+  /* =========================
+     Buttons
+  ========================= */
+  .btn{
+    padding: 7px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(148,163,184,.40);
+    background: rgba(15,23,42,.92);
+    color: white;
+    cursor: pointer;
+    font-weight: 900;
+    transition: transform .12s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+    box-shadow: 0 10px 18px rgba(15,23,42,.10);
+  }
+  .btn:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 14px 26px rgba(15,23,42,.14);
+  }
+  .btn:active{ transform: translateY(0px); box-shadow: 0 10px 18px rgba(15,23,42,.10); }
+
+  .btnPrimary{
+    border: 1px solid rgba(59,130,246,.55);
+    background: linear-gradient(180deg, rgba(59,130,246,.98), rgba(37,99,235,.98));
+    box-shadow: 0 14px 26px rgba(37,99,235,.24);
+  }
+
+  .btnGhost{
+    background: rgba(255,255,255,.78);
+    color: #0f172a;
+    border: 1px solid rgba(148,163,184,.45);
+    box-shadow: 0 10px 18px rgba(15,23,42,.06);
+  }
+  .btnGhost:hover{
+    background: rgba(255,255,255,.92);
+    border-color: rgba(100,116,139,.45);
+  }
+
+  .btnDanger{
+    border: 1px solid rgba(239,68,68,.40);
+    background: linear-gradient(180deg, rgba(239,68,68,.95), rgba(220,38,38,.95));
+    box-shadow: 0 14px 26px rgba(220,38,38,.18);
+  }
+
+  .btn:disabled{ opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; }
+
+  /* =========================
+     Badges
+  ========================= */
+  .badge{
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 900;
+    border: 1px solid rgba(148,163,184,.35);
+  }
+  .badgeSoft{
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 900;
+    background: rgba(15,23,42,.04);
+    color: #0f172a;
+    border: 1px solid rgba(148,163,184,.22);
+  }
+
+  /* =========================
+     Stepper
+  ========================= */
   .stepper{ display: grid; gap: 8px; }
-  .stepItem{ display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 14px; border: 1px solid rgba(210,218,235,.9); background: white; cursor: pointer; text-align: left; }
-  .stepActive{ background: rgba(80,125,255,.12); border-color: rgba(55,110,255,.35); }
-  .stepDot{ width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center; font-weight: 900; font-size: 12px; border: 1px solid rgba(210,218,235,.9); color: #2d4be8; }
-  .stepText{ font-weight: 900; font-size: 12.5px; color: #263455; }
+
+  .stepItem{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(148,163,184,.28);
+    background: rgba(255,255,255,.88);
+    cursor: pointer;
+    text-align: left;
+    transition: transform .12s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+  }
+  .stepItem:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 12px 22px rgba(15,23,42,.10);
+    border-color: rgba(59,130,246,.35);
+  }
+  .stepActive{
+    background: rgba(59,130,246,.10);
+    border-color: rgba(59,130,246,.35);
+  }
+  .stepDone{
+    border-color: rgba(34,197,94,.28);
+    background: rgba(34,197,94,.06);
+  }
+
+  .stepDot{
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-weight: 900;
+    font-size: 12px;
+    border: 1px solid rgba(148,163,184,.30);
+    color: #1d4ed8;
+    background: rgba(255,255,255,.9);
+  }
+  .stepText{
+    font-weight: 900;
+    font-size: 12.5px;
+    color: #0f172a;
+  }
+
+  /* =========================
+     Pattern list
+  ========================= */
+  .patternScroll{ overflow: auto; padding-right: 6px; }
+
+  /* =========================
+     Nudge pad / mini buttons
+  ========================= */
+  .miniPad{
+    display:grid;
+    grid-template-columns: repeat(3, 34px);
+    gap: 6px;
+    justify-content: end;
+  }
+
+  .miniBtn{
+    width:34px;
+    height:34px;
+    border-radius: 12px;
+    border: 1px solid rgba(59,130,246,.35);
+    background: linear-gradient(180deg, rgba(37,99,235,.92), rgba(29,78,216,.92));
+    color: white;
+    cursor:pointer;
+    font-weight: 900;
+    transition: transform .12s ease, box-shadow .18s ease;
+    box-shadow: 0 10px 18px rgba(37,99,235,.18);
+  }
+  .miniBtn:hover{ transform: translateY(-1px); box-shadow: 0 14px 24px rgba(37,99,235,.22); }
+  .miniBtn:disabled{ opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; }
+
+  .miniBtnWide{
+    height:34px;
+    border-radius: 12px;
+    border: 1px solid rgba(59,130,246,.30);
+    background: rgba(15,23,42,.92);
+    color: white;
+    cursor:pointer;
+    font-weight: 900;
+    padding: 0 12px;
+    font-size: 12px;
+    width: auto;
+    transition: transform .12s ease, box-shadow .18s ease;
+    box-shadow: 0 10px 18px rgba(15,23,42,.12);
+  }
+  .miniBtnWide:hover{ transform: translateY(-1px); box-shadow: 0 14px 24px rgba(15,23,42,.14); }
+  .miniBtnWide:disabled{ opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; }
+
+  /* =========================
+     Range input
+  ========================= */
+  input[type="range"]{
+    accent-color: #2563eb;
+  }
 `;
