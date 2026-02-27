@@ -49,7 +49,7 @@ class EnvErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
-  componentDidCatch() { }
+  componentDidCatch() {}
   render() {
     if (this.state.hasError) return null;
     return this.props.children;
@@ -215,6 +215,13 @@ function pickBestAxesFromBBox(mesh: THREE.Mesh): UVProjection {
   return "XY";
 }
 
+function isExtremeAspect(du: number, dv: number) {
+  const EPS = 1e-6;
+  const a = du / Math.max(dv, EPS);
+  const LIMIT = 20;
+  return du < EPS || dv < EPS || a > LIMIT || a < 1 / LIMIT;
+}
+
 function ensurePlanarUV(
   mesh: THREE.Mesh,
   axes?: UVProjection,
@@ -301,6 +308,74 @@ function ensurePlanarUV(
   (geo.getAttribute("uv") as THREE.BufferAttribute).needsUpdate = true;
 }
 
+function ensurePlanarUVByNormal(mesh: THREE.Mesh, flipU?: boolean, flipV?: boolean, force?: boolean) {
+  const geo = mesh.geometry as THREE.BufferGeometry;
+  const pos = geo.getAttribute("position") as THREE.BufferAttribute;
+  if (!pos) return;
+
+  const existingUV = geo.getAttribute("uv") as THREE.BufferAttribute | undefined;
+  if (!force && existingUV && existingUV.count === pos.count) return;
+
+  let nAttr = geo.getAttribute("normal") as THREE.BufferAttribute | undefined;
+  if (!nAttr) {
+    geo.computeVertexNormals();
+    nAttr = geo.getAttribute("normal") as THREE.BufferAttribute | undefined;
+  }
+  if (!nAttr) return;
+
+  const n = new THREE.Vector3();
+  const tmpN = new THREE.Vector3();
+  for (let i = 0; i < nAttr.count; i++) {
+    tmpN.set(nAttr.getX(i), nAttr.getY(i), nAttr.getZ(i));
+    if (tmpN.lengthSq() > 1e-12) n.add(tmpN);
+  }
+  if (n.lengthSq() < 1e-12) n.set(0, 0, 1);
+  n.normalize();
+
+  const up = Math.abs(n.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const t = new THREE.Vector3().crossVectors(up, n).normalize(); // tangent
+  const b = new THREE.Vector3().crossVectors(n, t).normalize(); // bitangent
+
+  const tmpP = new THREE.Vector3();
+  let minU = Infinity,
+    maxU = -Infinity,
+    minV = Infinity,
+    maxV = -Infinity;
+
+  for (let i = 0; i < pos.count; i++) {
+    tmpP.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+    const u = tmpP.dot(t);
+    const v = tmpP.dot(b);
+    if (u < minU) minU = u;
+    if (u > maxU) maxU = u;
+    if (v < minV) minV = v;
+    if (v > maxV) maxV = v;
+  }
+
+  const du = maxU - minU || 1;
+  const dv = maxV - minV || 1;
+
+  const uv = new Float32Array(pos.count * 2);
+
+  const baseFlipU = true;
+
+  for (let i = 0; i < pos.count; i++) {
+    tmpP.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+    let u = (tmpP.dot(t) - minU) / du;
+    let v = (tmpP.dot(b) - minV) / dv;
+
+    if (baseFlipU) u = 1 - u;
+    if (flipU) u = 1 - u;
+    if (flipV) v = 1 - v;
+
+    uv[i * 2] = Math.min(1, Math.max(0, u));
+    uv[i * 2 + 1] = Math.min(1, Math.max(0, v));
+  }
+
+  geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  (geo.getAttribute("uv") as THREE.BufferAttribute).needsUpdate = true;
+}
+
 function getWorldAlignMatrixFromRef(scene: THREE.Object3D, refMeshName?: string) {
   if (!refMeshName) return null;
   const ref = findMeshByName(scene, refMeshName);
@@ -354,13 +429,6 @@ function pickBestAxesFromWorldBox(bb: THREE.Box3): UVProjection {
   if (areaXZ >= areaXY && areaXZ >= areaYZ) return "XZ";
   if (areaYZ >= areaXY && areaYZ >= areaXZ) return "YZ";
   return "XY";
-}
-
-function isExtremeAspect(du: number, dv: number) {
-  const EPS = 1e-6;
-  const a = du / Math.max(dv, EPS);
-  const LIMIT = 20;
-  return du < EPS || dv < EPS || a > LIMIT || a < 1 / LIMIT;
 }
 
 function ensureWorldPlanarUV(args: {
@@ -442,7 +510,6 @@ function ensureWorldPlanarUV(args: {
   (geo.getAttribute("uv") as THREE.BufferAttribute).needsUpdate = true;
 }
 
-
 function applyFitWithPanOnSurface(
   tex: THREE.Texture,
   texW: number,
@@ -474,14 +541,9 @@ function applyFitWithPanOnSurface(
   let scale = 1;
 
   if (stableRotate) {
-    // ✅ FIX สำหรับ TYPE-3: 
-    // บังคับคำนวณจาก "เส้นทแยงมุม" (Diagonal) และ "บังคับ Cover" เสมอ!
-    // เพื่อให้ลายใหญ่พอที่จะคลุมปลั๊กมิดทุกองศา ไม่มีขอบแหว่ง และไม่มีการขึ้นลายซ้ำเด็ดขาด
     const diag = Math.sqrt(sU * sU + sV * sV);
     scale = Math.max(diag / tW, diag / tH);
   } else {
-    // ✅ สำหรับ TYPE-1, TYPE-2: 
-    // ใช้สมการไดนามิกเดิมของคุณที่บอกว่าทำงานได้ดีที่สุดแล้ว (เก็บไว้ 100% ไม่แตะต้อง)
     if (mode === "cover") {
       if (sU / sV > rotW / rotH) {
         scale = sU / rotW;
@@ -497,24 +559,22 @@ function applyFitWithPanOnSurface(
     }
   }
 
-  // ปรับ Scale ตาม Slider ซูม
   scale /= zoom;
 
-  // จัดการ minRepeat ป้องกันลายขยายใหญ่เกินไป
   if (minRepeat > 0) {
     const maxScaleX = sU / (rotW * minRepeat);
     const maxScaleY = sV / (rotH * minRepeat);
     scale = Math.min(scale, maxScaleX, maxScaleY);
   }
 
-  // บังคับใช้ Matrix ป้องกันการบีบยืด และให้การเลื่อน Pan ตรงตามแกน 3D เสมอ
   tex.matrixAutoUpdate = false;
-  tex.matrix.identity()
+  tex.matrix
+    .identity()
     .translate(-0.5, -0.5)
-    .scale(sU, sV) // แปลงเป็นหน่วย Physical
-    .rotate(rotationRad) // หมุนภาพ
-    .scale(1 / (tW * scale), 1 / (tH * scale)) // ดึงภาพกลับเข้ากรอบให้พอดี (Fit)
-    .translate(0.5 - px, 0.5 - py) // เลื่อนตำแหน่ง Slider
+    .scale(sU, sV)
+    .rotate(rotationRad)
+    .scale(1 / (tW * scale), 1 / (tH * scale))
+    .translate(0.5 - px, 0.5 - py)
     .translate(0.5, 0.5);
 
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -563,12 +623,12 @@ function applyPatternToMesh(args: {
   fitMode?: "contain" | "cover";
   minRepeat?: number;
   lockAxes?: boolean;
-  stableRotate?: boolean; // ✅ NEW
+  stableRotate?: boolean; 
 }) {
   const { targetMesh, patternTex, isPatternEnabled, axes, pan, worldBBox, alignMatrix } = args;
 
   clearPatternOverlay(targetMesh);
-  if (!isPatternEnabled) return () => { };
+  if (!isPatternEnabled) return () => {};
 
   const p = pan ?? { x: 0.5, y: 0.5, zoom: 1 };
   const fitMode = args.fitMode ?? "contain";
@@ -617,18 +677,7 @@ function applyPatternToMesh(args: {
       }
 
       const { du, dv } = getDuDvFromWorldBox(bb, activeAxes);
-      applyFitWithPanOnSurface(
-        tex,
-        baseW,
-        baseH,
-        du,
-        dv,
-        p,
-        fitMode,
-        minRepeat,
-        rot,
-        !!args.stableRotate
-      );
+      applyFitWithPanOnSurface(tex, baseW, baseH, du, dv, p, fitMode, minRepeat, rot, !!args.stableRotate);
     } else {
       const geo = targetMesh.geometry as THREE.BufferGeometry;
       geo.computeBoundingBox();
@@ -713,7 +762,7 @@ function applyPatternToMesh(args: {
       removeLoadListener = () => {
         try {
           img.removeEventListener("load", onLoad);
-        } catch { }
+        } catch {}
       };
     }
     tryApplyWhenReady();
@@ -751,7 +800,7 @@ function applyPatternToMesh(args: {
       removeLoadListener?.();
       overlayMat.dispose();
       tex.dispose();
-    } catch { }
+    } catch {}
   };
 }
 
@@ -791,7 +840,7 @@ function PlugScene({
   glRef: React.MutableRefObject<THREE.WebGLRenderer | null>;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
 }) {
-  const { scene } = useGLTF(config.modelPath);
+  const { scene } = useGLTF(config.modelPath) as any;
 
   const [logoMesh, setLogoMesh] = useState<THREE.Mesh | null>(null);
   const [patternMesh, setPatternMesh] = useState<THREE.Mesh | null>(null);
@@ -809,10 +858,8 @@ function PlugScene({
     return getWorldAlignMatrixFromRef(scene, config.patternWorldRefMesh);
   }, [scene, wantsWorld, config.patternWorldRefMesh]);
 
-  // ✅ FIX: รวม TYPE-2 และ TYPE-3 เข้าด้วยกัน เพื่อให้ได้รับฟีเจอร์ "ล็อคแกน+กันยืด" ทั้งคู่
   const isFixedType = config.id === "TYPE-2" || config.id === "TYPE-3";
 
-  // เลือกแกน world จาก bbox หลัง align เพื่อกันยืด + ให้คงที่
   const fixedWorldAxes = useMemo<UVProjection | null>(() => {
     if (!isFixedType) return null;
     if (!patternWorldBBox) return null;
@@ -822,19 +869,27 @@ function PlugScene({
 
   useEffect(() => {
     const m = findMeshByName(scene, config.decal.meshName);
+
     if (m) {
-      ensurePlanarUV(
-        m,
-        config.decal.uvProjection,
-        config.decal.flipU,
-        config.decal.flipV,
-        config.decal.forceUV,
-        config.decal.lockAxes
-      );
+      const isType3 = config.id === "TYPE-3";
+      if (isType3) {
+        ensurePlanarUVByNormal(m, config.decal.flipU, config.decal.flipV, true);
+      } else {
+        ensurePlanarUV(
+          m,
+          config.decal.uvProjection,
+          config.decal.flipU,
+          config.decal.flipV,
+          config.decal.forceUV,
+          config.decal.lockAxes
+        );
+      }
     }
+
     setLogoMesh(m);
   }, [
     scene,
+    config.id,
     config.decal.meshName,
     config.decal.uvProjection,
     config.decal.flipU,
@@ -944,15 +999,16 @@ function PlugScene({
     fixedWorldAxes,
   ]);
 
+  // ✅ ให้ Canvas เคลียร์การย่อขยายหมุนออกไปสำหรับ TYPE-3 เพื่อมารวมทำที่ Matrix ทีเดียวป้องกันอาการบีบเบี้ยว
   const stickerTex = useStickerTexture(
     logoUrl,
     logoTransform
       ? {
-        x: logoTransform.x,
-        y: logoTransform.y,
-        scale: Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : (logoTransform.scale as any),
-        rot: logoTransform.rot,
-      }
+          x: config.id === "TYPE-3" ? 0 : logoTransform.x,
+          y: config.id === "TYPE-3" ? 0 : logoTransform.y,
+          scale: config.id === "TYPE-3" ? 1 : (Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : (logoTransform.scale as any)),
+          rot: config.id === "TYPE-3" ? 0 : logoTransform.rot,
+        }
       : undefined
   );
 
@@ -961,7 +1017,7 @@ function PlugScene({
 
   const isPatternEnabled = !!patternUrl && patternUrl.trim() !== "";
   const texUrl = isPatternEnabled ? (patternUrl as string) : FALLBACK_TRANSPARENT_PNG;
-  const patternTex = useTexture(texUrl);
+  const patternTex = useTexture(texUrl) as THREE.Texture;
 
   useEffect(() => {
     applyColorsByTargets(scene, config.colorTargets, colors);
@@ -977,7 +1033,9 @@ function PlugScene({
     const wantsWorldMain = config.patternDecal?.uvSpace === "world";
 
     const rot =
-      (patternRotation !== undefined ? patternRotation : undefined) ?? (config.patternDecal as any)?.patternRotation ?? 0;
+      (patternRotation !== undefined ? patternRotation : undefined) ??
+      (config.patternDecal as any)?.patternRotation ??
+      0;
 
     const fitMode = patternFitMode ?? "contain";
     const minRepeat = 0;
@@ -1000,7 +1058,7 @@ function PlugScene({
       fitMode,
       minRepeat,
       lockAxes: isFixedType ? true : config.patternDecal?.lockAxes,
-      stableRotate: isFixedType, // ✅ เปิดใช้งานสมการ Diagonal คลุมมิดให้ TYPE-2 ด้วย
+      stableRotate: isFixedType,
     });
   }, [
     logoMesh,
@@ -1037,10 +1095,7 @@ function PlugScene({
       return;
     }
 
-    let axes = (sideCfg.uvProjection ??
-      config.patternDecal?.uvProjection ??
-      config.decal.uvProjection ??
-      "XZ") as UVProjection;
+    let axes = (sideCfg.uvProjection ?? config.patternDecal?.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
 
     const pan = patternTransform ?? { x: 0.5, y: 0.5, zoom: 1 };
     const wantsWorldSide = sideCfg.uvSpace === "world";
@@ -1070,7 +1125,7 @@ function PlugScene({
       rotationRad: rot,
       fitMode,
       lockAxes: isFixedType ? true : sideCfg.lockAxes,
-      stableRotate: isFixedType, // ✅ เปิดให้ TYPE-2 ด้วย
+      stableRotate: isFixedType,
     });
   }, [
     patternSideMesh,
@@ -1121,12 +1176,13 @@ function PlugScene({
       cloned.forEach((m: any) => {
         try {
           m?.dispose?.();
-        } catch { }
+        } catch {}
       });
     };
   }, [patternSideMesh, config.id, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
-  // logo overlay
+  // ✅ พระเอกของงานนี้: Universal Logo Matrix (แก้ยืดเบี้ยว 100%)
+// ✅ พระเอกของงานนี้: Universal Logo Matrix (แก้ยืดเบี้ยว 100% + ตัดเส้นยืดขอบ)
   useEffect(() => {
     if (!logoMesh) return;
 
@@ -1134,6 +1190,57 @@ function PlugScene({
     if (old) old.parent?.remove(old);
 
     if (!logoUrl || !stickerTex) return;
+
+    if (config.id === "TYPE-3") {
+      // 1. คำนวณความกว้างและยาวของหน้าปลั๊ก
+      let du = 1, dv = 1;
+      logoMesh.geometry.computeBoundingBox();
+      const s = new THREE.Vector3();
+      logoMesh.geometry.boundingBox?.getSize(s);
+      
+      const proj = config.decal.uvProjection || "XZ";
+      if (proj === "XY") { du = s.x; dv = s.y; }
+      else if (proj === "XZ") { du = s.x; dv = s.z; }
+      else { du = s.y; dv = s.z; }
+      
+      du = Math.max(0.001, du);
+      dv = Math.max(0.001, dv);
+
+      // 2. หาสัดส่วนที่ผิดเพี้ยนไป (Aspect Normalization) เพื่อปรับ UV ให้เป็น 1:1 เสมอ
+      const maxDim = Math.max(du, dv);
+      const normX = du / maxDim; 
+      const normY = dv / maxDim; 
+
+      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
+      const rotUI = logoTransform?.rot ?? 0;
+      const totalRot = rotConfig + rotUI;
+      
+      const px = logoTransform?.x ?? 0;
+      const py = logoTransform?.y ?? 0;
+      
+      let uiScale = 1;
+      if (logoTransform?.scale !== undefined) {
+          uiScale = Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale;
+      }
+
+      stickerTex.matrixAutoUpdate = false;
+      stickerTex.matrix.identity()
+        // จับระยะ Pan เมาส์ ย้ายมาลบตั้งแต่ขั้นตอนแรก (Origin)
+        .translate(-0.5 - px, -0.5 - py) 
+        .scale(normX, normY)             // แก้ความบีบเบี้ยวโดยทำให้สัดส่วนภาพเท่ากันทุกทิศทาง
+        .rotate(totalRot)                // หมุนได้อิสระโดยที่ภาพไม่ยืด
+        .scale(1 / uiScale, 1 / uiScale) // ปรับขนาดสเกลตาม Slider ของ User
+        .translate(0.5, 0.5);            // คืนพิกัดกลับ
+        
+    } else {
+      // สำหรับ TYPE-1, TYPE-2 ปล่อยทำงานปกติ
+      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
+      stickerTex.matrixAutoUpdate = false;
+      stickerTex.matrix.identity()
+        .translate(-0.5, -0.5)
+        .rotate(rotConfig)
+        .translate(0.5, 0.5);
+    }
 
     stickerTex.flipY = false;
     stickerTex.needsUpdate = true;
@@ -1146,6 +1253,22 @@ function PlugScene({
       depthTest: true,
       depthWrite: false,
     });
+
+    // ✅ เพิ่มโค้ดไม้ตายตรงนี้: แฮ็ก Shader เพื่อตัดขอบภาพที่ล้นออกไปทิ้งไป (แก้ปัญหาเส้นยืด 100%)
+    overlayMat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        `#include <map_fragment>`,
+        `
+        #include <map_fragment>
+        #ifdef USE_MAP
+          // ถ้าระยะ UV อยู่นอกเหนือจากกรอบภาพ (0 ถึง 1) ให้สั่งซ่อนพิกเซลนั้นทันที (Alpha = 0)
+          if (vMapUv.x < 0.001 || vMapUv.x > 0.999 || vMapUv.y < 0.001 || vMapUv.y > 0.999) {
+              diffuseColor.a = 0.0; 
+          }
+        #endif
+        `
+      );
+    };
 
     overlayMat.polygonOffset = true;
     overlayMat.polygonOffsetFactor = -2;
@@ -1161,13 +1284,13 @@ function PlugScene({
       overlay.parent?.remove(overlay);
       overlayMat.dispose();
     };
-  }, [logoMesh, stickerTex, logoUrl]);
+  }, [logoMesh, stickerTex, logoUrl, logoTransform, config]);
 
   // render
   useEffect(() => {
     if (!onRenderReady) return;
 
-    onRenderReady((opts) => {
+    onRenderReady((opts?: { transparent?: boolean; filename?: string }) => {
       const gl = glRef.current;
       const camera = cameraRef.current;
       if (!gl || !camera) return;
@@ -1211,8 +1334,7 @@ function PlugScene({
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragLogoMode || !draggingRef.current || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange)
-      return;
+    if (!dragLogoMode || !draggingRef.current || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange) return;
     if (e?.object !== logoMesh) return;
 
     e.stopPropagation();
