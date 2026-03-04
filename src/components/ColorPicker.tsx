@@ -102,7 +102,7 @@ export default function ColorPicker({ label, initialColor, onColorChange }: Prop
     fontSize: 13,
     letterSpacing: ".4px",
     outline: "none",
-    boxShadow: "0 8px 16px rgba(15,23,42,.05)",
+    boxShadow: "0 8px 16px rgba(40, 43, 51, 0.05)",
   };
 
   /* =========================
