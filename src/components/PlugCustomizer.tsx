@@ -72,11 +72,28 @@ const DEFAULT_PATTERN_TRANSFORM: PatternTransform = {
   zoom: 1,
 };
 
+const ALLOWED_COLOR_OPTIONS = [
+  { label: "ขาว", value: "#ffffff" },
+  { label: "ดำ", value: "#111111" },
+  { label: "เทาอ่อน", value: "#d9d9d9" },
+  { label: "เทาเข้ม", value: "#7a7a7a" },
+  { label: "ครีม", value: "#f3ead8" },
+  { label: "เบจ", value: "#d6c2a1" },
+  { label: "น้ำเงิน", value: "#1d4ed8" },
+  { label: "กรม", value: "#1e293b" },
+];
+
 function normalizeHex(hex?: string) {
   if (!hex) return hex;
   const h = hex.trim();
   if (!h.startsWith("#")) return h;
-  return h.length >= 7 ? h.slice(0, 7) : h;
+  return h.length >= 7 ? h.slice(0, 7).toLowerCase() : h.toLowerCase();
+}
+
+function ensureAllowedColor(color: string, options: { label: string; value: string }[]) {
+  const normalized = normalizeHex(color) ?? "";
+  const found = options.find((o) => (normalizeHex(o.value) ?? "") === normalized);
+  return found ? found.value : options[0].value;
 }
 
 function clamp(n: number, a: number, b: number) {
@@ -90,9 +107,11 @@ function stepIndex(id: StepId) {
 function radToDeg(r: number) {
   return (r * 180) / Math.PI;
 }
+
 function degToRad(d: number) {
   return (d * Math.PI) / 180;
 }
+
 function normalizeRad(r: number) {
   // ให้อยู่ในช่วง (-PI..PI] เพื่อไม่ให้ค่าบวม
   const TWO_PI = Math.PI * 2;
@@ -127,17 +146,15 @@ export default function PlugCustomizer({ plugId }: Props) {
     [selectedPlugId, plug.modelPath]
   );
 
-  // ✅ FIX (ไม่กระทบส่วนอื่น):
-  // ส่ง switchColor เฉพาะรุ่นที่มีสวิตช์จริง (ไม่ใช่ TYPE-1 และ TYPE-3)
+  // ✅ FIX: ส่งเฉพาะสีที่อนุญาต + ไม่ส่ง switch ให้ TYPE-1 / TYPE-3
   const safeColors = useMemo(() => {
     const out: Partial<Record<ColorKey, string>> = {
-      top: normalizeHex(customization.topColor) ?? "",
-      bottom: normalizeHex(customization.bottomColor) ?? "",
+      top: ensureAllowedColor(customization.topColor, ALLOWED_COLOR_OPTIONS),
+      bottom: ensureAllowedColor(customization.bottomColor, ALLOWED_COLOR_OPTIONS),
     };
 
-    // ✅ TYPE-3 ไม่มีสวิตช์ -> ไม่ส่ง switch
     if (selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3") {
-      out.switch = normalizeHex(customization.switchColor) ?? "";
+      out.switch = ensureAllowedColor(customization.switchColor, ALLOWED_COLOR_OPTIONS);
     }
 
     return out;
@@ -164,7 +181,13 @@ export default function PlugCustomizer({ plugId }: Props) {
   }
 
   function resetAll() {
-    patchCustomization({ patternUrl: "", logoUrl: undefined });
+    patchCustomization({
+      patternUrl: "",
+      logoUrl: undefined,
+      topColor: ALLOWED_COLOR_OPTIONS[0].value,
+      bottomColor: "#eaeaea",
+      switchColor: ALLOWED_COLOR_OPTIONS[0].value,
+    });
     setLogoTransform(DEFAULT_LOGO_TRANSFORM);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
@@ -194,7 +217,13 @@ export default function PlugCustomizer({ plugId }: Props) {
 
   function handleChangeModel(id: string) {
     setSelectedPlugId(id);
-    patchCustomization({ patternUrl: "", logoUrl: undefined });
+    patchCustomization({
+      patternUrl: "",
+      logoUrl: undefined,
+      topColor: ensureAllowedColor(customization.topColor, ALLOWED_COLOR_OPTIONS),
+      bottomColor: ensureAllowedColor(customization.bottomColor, ALLOWED_COLOR_OPTIONS),
+      switchColor: ensureAllowedColor(customization.switchColor, ALLOWED_COLOR_OPTIONS),
+    });
     setLogoTransform(DEFAULT_LOGO_TRANSFORM);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
@@ -217,9 +246,11 @@ export default function PlugCustomizer({ plugId }: Props) {
   function rotatePattern(deltaRad: number) {
     setPatternRotation((r) => normalizeRad(r + deltaRad));
   }
+
   function setRotationDeg(deg: number) {
     setPatternRotation(normalizeRad(degToRad(deg)));
   }
+
   const rotationDeg = Math.round(radToDeg(patternRotation));
 
   function renderStepContent() {
@@ -242,11 +273,19 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="hint">ปรับสีส่วนประกอบหลักของชิ้นงาน</div>
 
           <div style={{ marginTop: 10 }}>
-            <ColorPicker label="ฝาบน" initialColor={customization.topColor} onColorChange={(c) => patchCustomization({ topColor: c })} />
+            <ColorPicker
+              label="ฝาบน"
+              initialColor={customization.topColor}
+              options={ALLOWED_COLOR_OPTIONS}
+              onColorChange={(c) => patchCustomization({ topColor: c })}
+            />
+
             <div style={{ height: 10 }} />
+
             <ColorPicker
               label="ฝาล่าง"
               initialColor={customization.bottomColor}
+              options={ALLOWED_COLOR_OPTIONS}
               onColorChange={(c) => patchCustomization({ bottomColor: c })}
             />
 
@@ -257,6 +296,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <ColorPicker
                   label="สวิตช์"
                   initialColor={customization.switchColor}
+                  options={ALLOWED_COLOR_OPTIONS}
                   onColorChange={(c) => patchCustomization({ switchColor: c })}
                 />
               </>
@@ -301,7 +341,6 @@ export default function PlugCustomizer({ plugId }: Props) {
 
           <div style={{ opacity: hasPattern ? 1 : 0.45 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 12 }}>
-              {/* LEFT */}
               <div>
                 <Slider
                   label={`X: ${patternTransform.x.toFixed(2)}`}
@@ -398,7 +437,6 @@ export default function PlugCustomizer({ plugId }: Props) {
                 </div>
               </div>
 
-              {/* RIGHT */}
               <div>
                 <div className="label">เลื่อนละเอียด</div>
                 <div className="miniPad" style={{ marginTop: 8 }}>
@@ -719,9 +757,6 @@ function Slider({
 }
 
 const CSS = `
-  /* =========================
-     Base layout / background
-  ========================= */
   .pc-wrap{
     min-height: 100vh;
     padding: 14px;
@@ -748,9 +783,6 @@ const CSS = `
     .sticky{ position: static !important; }
   }
 
-  /* =========================
-     Card system
-  ========================= */
   .card{
     background: rgba(255,255,255,.94);
     border: 1px solid rgba(226,232,240,.9);
@@ -782,9 +814,6 @@ const CSS = `
     overflow: hidden;
   }
 
-  /* =========================
-     Typography (FIX contrast)
-  ========================= */
   .label{
     font-size:12.5px;
     font-weight: 900;
@@ -800,16 +829,10 @@ const CSS = `
     opacity: 1;
   }
 
-  /* =========================
-     Common UI
-  ========================= */
   .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .divider{ height:1px; background: rgba(226,232,240,.9); margin:10px 0; }
   .sticky{ position: sticky; top: 12px; }
 
-  /* =========================
-     Buttons
-  ========================= */
   .btn{
     padding: 7px 12px;
     border-radius: 12px;
@@ -852,9 +875,6 @@ const CSS = `
 
   .btn:disabled{ opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; }
 
-  /* =========================
-     Badges
-  ========================= */
   .badge{
     padding: 6px 10px;
     border-radius: 999px;
@@ -862,6 +882,7 @@ const CSS = `
     font-weight: 900;
     border: 1px solid rgba(148,163,184,.35);
   }
+
   .badgeSoft{
     padding: 6px 10px;
     border-radius: 999px;
@@ -872,9 +893,6 @@ const CSS = `
     border: 1px solid rgba(148,163,184,.22);
   }
 
-  /* =========================
-     Stepper
-  ========================= */
   .stepper{ display: grid; gap: 8px; }
 
   .stepItem{
@@ -915,20 +933,15 @@ const CSS = `
     color: #1d4ed8;
     background: rgba(255,255,255,.9);
   }
+
   .stepText{
     font-weight: 900;
     font-size: 12.5px;
     color: #0f172a;
   }
 
-  /* =========================
-     Pattern list
-  ========================= */
   .patternScroll{ overflow: auto; padding-right: 6px; }
 
-  /* =========================
-     Nudge pad / mini buttons
-  ========================= */
   .miniPad{
     display:grid;
     grid-template-columns: repeat(3, 34px);
@@ -968,9 +981,6 @@ const CSS = `
   .miniBtnWide:hover{ transform: translateY(-1px); box-shadow: 0 14px 24px rgba(15,23,42,.14); }
   .miniBtnWide:disabled{ opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; }
 
-  /* =========================
-     Range input
-  ========================= */
   input[type="range"]{
     accent-color: #2563eb;
   }

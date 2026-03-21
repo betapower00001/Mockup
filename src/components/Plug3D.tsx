@@ -49,7 +49,7 @@ class EnvErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
-  componentDidCatch() {}
+  componentDidCatch() { }
   render() {
     if (this.state.hasError) return null;
     return this.props.children;
@@ -623,12 +623,12 @@ function applyPatternToMesh(args: {
   fitMode?: "contain" | "cover";
   minRepeat?: number;
   lockAxes?: boolean;
-  stableRotate?: boolean; 
+  stableRotate?: boolean;
 }) {
   const { targetMesh, patternTex, isPatternEnabled, axes, pan, worldBBox, alignMatrix } = args;
 
   clearPatternOverlay(targetMesh);
-  if (!isPatternEnabled) return () => {};
+  if (!isPatternEnabled) return () => { };
 
   const p = pan ?? { x: 0.5, y: 0.5, zoom: 1 };
   const fitMode = args.fitMode ?? "contain";
@@ -762,7 +762,7 @@ function applyPatternToMesh(args: {
       removeLoadListener = () => {
         try {
           img.removeEventListener("load", onLoad);
-        } catch {}
+        } catch { }
       };
     }
     tryApplyWhenReady();
@@ -800,7 +800,7 @@ function applyPatternToMesh(args: {
       removeLoadListener?.();
       overlayMat.dispose();
       tex.dispose();
-    } catch {}
+    } catch { }
   };
 }
 
@@ -1004,11 +1004,11 @@ function PlugScene({
     logoUrl,
     logoTransform
       ? {
-          x: config.id === "TYPE-3" ? 0 : logoTransform.x,
-          y: config.id === "TYPE-3" ? 0 : logoTransform.y,
-          scale: config.id === "TYPE-3" ? 1 : (Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : (logoTransform.scale as any)),
-          rot: config.id === "TYPE-3" ? 0 : logoTransform.rot,
-        }
+        x: config.id === "TYPE-3" ? 0 : logoTransform.x,
+        y: config.id === "TYPE-3" ? 0 : logoTransform.y,
+        scale: config.id === "TYPE-3" ? 1 : (Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : (logoTransform.scale as any)),
+        rot: config.id === "TYPE-3" ? 0 : logoTransform.rot,
+      }
       : undefined
   );
 
@@ -1176,13 +1176,13 @@ function PlugScene({
       cloned.forEach((m: any) => {
         try {
           m?.dispose?.();
-        } catch {}
+        } catch { }
       });
     };
   }, [patternSideMesh, config.id, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
   // ✅ พระเอกของงานนี้: Universal Logo Matrix (แก้ยืดเบี้ยว 100%)
-// ✅ พระเอกของงานนี้: Universal Logo Matrix (แก้ยืดเบี้ยว 100% + ตัดเส้นยืดขอบ)
+  // ✅ พระเอกของงานนี้: Universal Logo Matrix (แก้ยืดเบี้ยว 100% + ตัดเส้นยืดขอบ)
   useEffect(() => {
     if (!logoMesh) return;
 
@@ -1197,41 +1197,41 @@ function PlugScene({
       logoMesh.geometry.computeBoundingBox();
       const s = new THREE.Vector3();
       logoMesh.geometry.boundingBox?.getSize(s);
-      
+
       const proj = config.decal.uvProjection || "XZ";
       if (proj === "XY") { du = s.x; dv = s.y; }
       else if (proj === "XZ") { du = s.x; dv = s.z; }
       else { du = s.y; dv = s.z; }
-      
+
       du = Math.max(0.001, du);
       dv = Math.max(0.001, dv);
 
       // 2. หาสัดส่วนที่ผิดเพี้ยนไป (Aspect Normalization) เพื่อปรับ UV ให้เป็น 1:1 เสมอ
       const maxDim = Math.max(du, dv);
-      const normX = du / maxDim; 
-      const normY = dv / maxDim; 
+      const normX = du / maxDim;
+      const normY = dv / maxDim;
 
       const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
       const rotUI = logoTransform?.rot ?? 0;
       const totalRot = rotConfig + rotUI;
-      
+
       const px = logoTransform?.x ?? 0;
       const py = logoTransform?.y ?? 0;
-      
+
       let uiScale = 1;
       if (logoTransform?.scale !== undefined) {
-          uiScale = Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale;
+        uiScale = Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale;
       }
 
       stickerTex.matrixAutoUpdate = false;
       stickerTex.matrix.identity()
         // จับระยะ Pan เมาส์ ย้ายมาลบตั้งแต่ขั้นตอนแรก (Origin)
-        .translate(-0.5 - px, -0.5 - py) 
+        .translate(-0.5 - px, -0.5 - py)
         .scale(normX, normY)             // แก้ความบีบเบี้ยวโดยทำให้สัดส่วนภาพเท่ากันทุกทิศทาง
         .rotate(totalRot)                // หมุนได้อิสระโดยที่ภาพไม่ยืด
         .scale(1 / uiScale, 1 / uiScale) // ปรับขนาดสเกลตาม Slider ของ User
         .translate(0.5, 0.5);            // คืนพิกัดกลับ
-        
+
     } else {
       // สำหรับ TYPE-1, TYPE-2 ปล่อยทำงานปกติ
       const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
@@ -1325,10 +1325,12 @@ function PlugScene({
     draggingRef.current = true;
 
     if (e.uv) {
+      const isType3 = config.id === "TYPE-3";
+
       onLogoTransformChange({
         ...logoTransform,
         x: e.uv.x - 0.5,
-        y: 0.5 - e.uv.y,
+        y: isType3 ? e.uv.y - 0.5 : 0.5 - e.uv.y,
       });
     }
   };
@@ -1340,10 +1342,12 @@ function PlugScene({
     e.stopPropagation();
 
     if (e.uv) {
+      const isType3 = config.id === "TYPE-3";
+
       onLogoTransformChange({
         ...logoTransform,
         x: e.uv.x - 0.5,
-        y: 0.5 - e.uv.y,
+        y: isType3 ? e.uv.y - 0.5 : 0.5 - e.uv.y,
       });
     }
   };

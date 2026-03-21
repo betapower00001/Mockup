@@ -1,11 +1,18 @@
 // src/components/ColorPicker.tsx
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 
+type ColorOption = {
+  label: string;
+  value: string;
+};
+
 type Props = {
   label: string;
   initialColor: string;
+  options: ColorOption[];
   onColorChange: (color: string) => void;
 };
 
@@ -45,28 +52,48 @@ function normalizeHex(input: string) {
    Component
 ========================= */
 
-export default function ColorPicker({ label, initialColor, onColorChange }: Props) {
-  const [value, setValue] = useState<string>(normalizeHex(initialColor));
+export default function ColorPicker({ label, initialColor, options, onColorChange }: Props) {
+  const normalizedOptions = useMemo(
+    () =>
+      options.map((o) => ({
+        ...o,
+        value: normalizeHex(o.value),
+      })),
+    [options]
+  );
+
+  const fallbackColor = normalizedOptions[0]?.value ?? "#000000";
+  const normalizedInitial = normalizeHex(initialColor);
+
+  const [value, setValue] = useState<string>(
+    normalizedOptions.some((o) => o.value === normalizedInitial) ? normalizedInitial : fallbackColor
+  );
 
   useEffect(() => {
-    setValue(normalizeHex(initialColor));
-  }, [initialColor]);
+    const next = normalizedOptions.some((o) => o.value === normalizedInitial) ? normalizedInitial : fallbackColor;
+    setValue(next);
+  }, [normalizedInitial, fallbackColor, normalizedOptions]);
 
   function commit(next: string) {
     const normalized = normalizeHex(next);
-    setValue(normalized);
-    onColorChange(normalized);
+    const allowed = normalizedOptions.some((o) => o.value === normalized);
+    const finalColor = allowed ? normalized : fallbackColor;
+    setValue(finalColor);
+    onColorChange(finalColor);
   }
 
+  const selectedLabel =
+    normalizedOptions.find((o) => o.value === value)?.label ?? value.toUpperCase();
+
   /* =========================
-     Styles (Professional UI)
+     Styles
   ========================= */
 
   const containerStyle: React.CSSProperties = {
     display: "grid",
-    gridTemplateColumns: "110px 52px 1fr",
-    alignItems: "center",
+    gridTemplateColumns: "110px 1fr",
     gap: 12,
+    alignItems: "start",
     padding: "10px 14px",
     borderRadius: 16,
     background: "rgba(255,255,255,.94)",
@@ -79,54 +106,105 @@ export default function ColorPicker({ label, initialColor, onColorChange }: Prop
     fontWeight: 900,
     color: "#0f172a",
     letterSpacing: ".3px",
+    paddingTop: 8,
   };
 
-  const swatchStyle: React.CSSProperties = {
-    width: 48,
-    height: 36,
-    borderRadius: 14,
-    border: "1px solid rgba(148,163,184,.45)",
-    padding: 0,
-    cursor: "pointer",
-    boxShadow: "0 10px 18px rgba(15,23,42,.08)",
+  const rightWrapStyle: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "10px 12px",
-    borderRadius: 14,
-    border: "1px solid rgba(148,163,184,.45)",
-    background: "white",
-    color: "#0f172a",
+  const selectedStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 10px",
+    borderRadius: 12,
+    background: "rgba(248,250,252,.95)",
+    border: "1px solid rgba(148,163,184,.28)",
+    fontSize: 12,
     fontWeight: 800,
-    fontSize: 13,
-    letterSpacing: ".4px",
-    outline: "none",
-    boxShadow: "0 8px 16px rgba(40, 43, 51, 0.05)",
+    color: "#0f172a",
+    width: "fit-content",
   };
 
-  /* =========================
-     Render
-  ========================= */
+  const selectedDotStyle: React.CSSProperties = {
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    border: "1px solid rgba(15,23,42,.12)",
+    background: value,
+    boxShadow: "inset 0 0 0 1px rgba(255,255,255,.5)",
+  };
+
+  const optionsGridStyle: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))",
+    gap: 8,
+  };
+
+  function getSwatchButtonStyle(active: boolean, color: string): React.CSSProperties {
+    return {
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 8,
+      padding: "10px 8px",
+      borderRadius: 14,
+      border: active ? "1px solid rgba(37,99,235,.55)" : "1px solid rgba(148,163,184,.28)",
+      background: active ? "rgba(59,130,246,.08)" : "white",
+      cursor: "pointer",
+      boxShadow: active
+        ? "0 12px 22px rgba(37,99,235,.14)"
+        : "0 8px 16px rgba(15,23,42,.05)",
+      transition: "transform .12s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease",
+      fontWeight: 800,
+      fontSize: 12,
+      color: "#0f172a",
+    };
+  }
+
+  function getSwatchCircleStyle(color: string): React.CSSProperties {
+    return {
+      width: 28,
+      height: 28,
+      borderRadius: 999,
+      background: color,
+      border: "1px solid rgba(15,23,42,.14)",
+      boxShadow: "inset 0 0 0 1px rgba(255,255,255,.45)",
+      flexShrink: 0,
+    };
+  }
 
   return (
     <div style={containerStyle}>
       <div style={labelStyle}>{label}</div>
 
-      <input
-        type="color"
-        value={value}
-        onChange={(e) => commit(e.target.value)}
-        style={swatchStyle}
-      />
+      <div style={rightWrapStyle}>
+        <div style={selectedStyle}>
+          <span style={selectedDotStyle} />
+          เลือกอยู่: {selectedLabel} ({value.toUpperCase()})
+        </div>
 
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => commit(e.target.value)}
-        style={inputStyle}
-        spellCheck={false}
-      />
+        <div style={optionsGridStyle}>
+          {normalizedOptions.map((option) => {
+            const active = value === option.value;
+            return (
+              <button
+                key={`${option.label}-${option.value}`}
+                type="button"
+                onClick={() => commit(option.value)}
+                style={getSwatchButtonStyle(active, option.value)}
+                title={`${option.label} ${option.value}`}
+              >
+                <span style={getSwatchCircleStyle(option.value)} />
+                <span>{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
