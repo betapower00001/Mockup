@@ -26,6 +26,7 @@ type Plug3DProps = {
   onLogoTransformChange?: (t: LogoTransform) => void;
 
   patternTransform?: PatternTransform;
+  onPatternTransformChange?: (t: PatternTransform) => void;
 
   patternRotation?: number;
   patternBrightness?: number; // default 0.75
@@ -33,6 +34,7 @@ type Plug3DProps = {
   patternFitMode?: "contain" | "cover";
 
   dragLogoMode?: boolean;
+  dragPatternMode?: boolean;
 
   renderMode?: boolean;
   onRenderReady?: (render: (opts?: { transparent?: boolean; filename?: string }) => void) => void;
@@ -333,8 +335,8 @@ function ensurePlanarUVByNormal(mesh: THREE.Mesh, flipU?: boolean, flipV?: boole
   n.normalize();
 
   const up = Math.abs(n.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-  const t = new THREE.Vector3().crossVectors(up, n).normalize(); // tangent
-  const b = new THREE.Vector3().crossVectors(n, t).normalize(); // bitangent
+  const t = new THREE.Vector3().crossVectors(up, n).normalize();
+  const b = new THREE.Vector3().crossVectors(n, t).normalize();
 
   const tmpP = new THREE.Vector3();
   let minU = Infinity,
@@ -815,11 +817,13 @@ function PlugScene({
   logoTransform,
   onLogoTransformChange,
   patternTransform,
+  onPatternTransformChange,
   patternRotation,
   patternBrightness,
   patternOpacity,
   patternFitMode,
   dragLogoMode,
+  dragPatternMode,
   onRenderReady,
   glRef,
   cameraRef,
@@ -831,11 +835,13 @@ function PlugScene({
   logoTransform?: LogoTransform;
   onLogoTransformChange?: (t: LogoTransform) => void;
   patternTransform?: PatternTransform;
+  onPatternTransformChange?: (t: PatternTransform) => void;
   patternRotation?: number;
   patternBrightness?: number;
   patternOpacity?: number;
   patternFitMode?: "contain" | "cover";
   dragLogoMode?: boolean;
+  dragPatternMode?: boolean;
   onRenderReady?: Plug3DProps["onRenderReady"];
   glRef: React.MutableRefObject<THREE.WebGLRenderer | null>;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
@@ -999,14 +1005,18 @@ function PlugScene({
     fixedWorldAxes,
   ]);
 
-  // ✅ ให้ Canvas เคลียร์การย่อขยายหมุนออกไปสำหรับ TYPE-3 เพื่อมารวมทำที่ Matrix ทีเดียวป้องกันอาการบีบเบี้ยว
   const stickerTex = useStickerTexture(
     logoUrl,
     logoTransform
       ? {
         x: config.id === "TYPE-3" ? 0 : logoTransform.x,
         y: config.id === "TYPE-3" ? 0 : logoTransform.y,
-        scale: config.id === "TYPE-3" ? 1 : (Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : (logoTransform.scale as any)),
+        scale:
+          config.id === "TYPE-3"
+            ? 1
+            : Array.isArray(logoTransform.scale)
+              ? logoTransform.scale[0]
+              : (logoTransform.scale as any),
         rot: config.id === "TYPE-3" ? 0 : logoTransform.rot,
       }
       : undefined
@@ -1181,8 +1191,7 @@ function PlugScene({
     };
   }, [patternSideMesh, config.id, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
-  // ✅ พระเอกของงานนี้: Universal Logo Matrix (แก้ยืดเบี้ยว 100%)
-  // ✅ พระเอกของงานนี้: Universal Logo Matrix (แก้ยืดเบี้ยว 100% + ตัดเส้นยืดขอบ)
+  // ✅ Universal Logo Matrix
   useEffect(() => {
     if (!logoMesh) return;
 
@@ -1192,21 +1201,27 @@ function PlugScene({
     if (!logoUrl || !stickerTex) return;
 
     if (config.id === "TYPE-3") {
-      // 1. คำนวณความกว้างและยาวของหน้าปลั๊ก
-      let du = 1, dv = 1;
+      let du = 1,
+        dv = 1;
       logoMesh.geometry.computeBoundingBox();
       const s = new THREE.Vector3();
       logoMesh.geometry.boundingBox?.getSize(s);
 
       const proj = config.decal.uvProjection || "XZ";
-      if (proj === "XY") { du = s.x; dv = s.y; }
-      else if (proj === "XZ") { du = s.x; dv = s.z; }
-      else { du = s.y; dv = s.z; }
+      if (proj === "XY") {
+        du = s.x;
+        dv = s.y;
+      } else if (proj === "XZ") {
+        du = s.x;
+        dv = s.z;
+      } else {
+        du = s.y;
+        dv = s.z;
+      }
 
       du = Math.max(0.001, du);
       dv = Math.max(0.001, dv);
 
-      // 2. หาสัดส่วนที่ผิดเพี้ยนไป (Aspect Normalization) เพื่อปรับ UV ให้เป็น 1:1 เสมอ
       const maxDim = Math.max(du, dv);
       const normX = du / maxDim;
       const normY = dv / maxDim;
@@ -1224,22 +1239,17 @@ function PlugScene({
       }
 
       stickerTex.matrixAutoUpdate = false;
-      stickerTex.matrix.identity()
-        // จับระยะ Pan เมาส์ ย้ายมาลบตั้งแต่ขั้นตอนแรก (Origin)
+      stickerTex.matrix
+        .identity()
         .translate(-0.5 - px, -0.5 - py)
-        .scale(normX, normY)             // แก้ความบีบเบี้ยวโดยทำให้สัดส่วนภาพเท่ากันทุกทิศทาง
-        .rotate(totalRot)                // หมุนได้อิสระโดยที่ภาพไม่ยืด
-        .scale(1 / uiScale, 1 / uiScale) // ปรับขนาดสเกลตาม Slider ของ User
-        .translate(0.5, 0.5);            // คืนพิกัดกลับ
-
+        .scale(normX, normY)
+        .rotate(totalRot)
+        .scale(1 / uiScale, 1 / uiScale)
+        .translate(0.5, 0.5);
     } else {
-      // สำหรับ TYPE-1, TYPE-2 ปล่อยทำงานปกติ
       const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
       stickerTex.matrixAutoUpdate = false;
-      stickerTex.matrix.identity()
-        .translate(-0.5, -0.5)
-        .rotate(rotConfig)
-        .translate(0.5, 0.5);
+      stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(rotConfig).translate(0.5, 0.5);
     }
 
     stickerTex.flipY = false;
@@ -1254,14 +1264,12 @@ function PlugScene({
       depthWrite: false,
     });
 
-    // ✅ เพิ่มโค้ดไม้ตายตรงนี้: แฮ็ก Shader เพื่อตัดขอบภาพที่ล้นออกไปทิ้งไป (แก้ปัญหาเส้นยืด 100%)
     overlayMat.onBeforeCompile = (shader) => {
       shader.fragmentShader = shader.fragmentShader.replace(
         `#include <map_fragment>`,
         `
         #include <map_fragment>
         #ifdef USE_MAP
-          // ถ้าระยะ UV อยู่นอกเหนือจากกรอบภาพ (0 ถึง 1) ให้สั่งซ่อนพิกเซลนั้นทันที (Alpha = 0)
           if (vMapUv.x < 0.001 || vMapUv.x > 0.999 || vMapUv.y < 0.001 || vMapUv.y > 0.999) {
               diffuseColor.a = 0.0; 
           }
@@ -1316,6 +1324,8 @@ function PlugScene({
   }, [onRenderReady, glRef, cameraRef, scene]);
 
   const draggingRef = useRef(false);
+  const draggingPatternRef = useRef(false);
+  const patternDragStartRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
 
   const onPointerDown = (e: any) => {
     if (!dragLogoMode || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange) return;
@@ -1356,9 +1366,106 @@ function PlugScene({
     draggingRef.current = false;
   };
 
+  // =======================
+  // PATTERN DRAG
+  // =======================
+  const activePatternMesh = patternMesh ?? logoMesh;
+  const DRAG_SENSITIVITY = 2.5;
+
+  const onPatternPointerDown = (e: any) => {
+    if (!dragPatternMode || !isPatternEnabled || !activePatternMesh || !patternTransform || !onPatternTransformChange) return;
+    if (e?.object !== activePatternMesh) return;
+
+    e.stopPropagation();
+
+    // แบบ Hold & Drag (ถ้าอยากได้คลิกเปิด/ปิด ให้เปลี่ยนเป็น draggingPatternRef.current = !draggingPatternRef.current)
+    draggingPatternRef.current = true;
+
+    if (e.uv) {
+      patternDragStartRef.current = {
+        x: e.uv.x,
+        y: e.uv.y,
+        px: patternTransform.x,
+        py: patternTransform.y,
+      };
+    }
+  };
+
+  const onPatternPointerMove = (e: any) => {
+    if (
+      !dragPatternMode ||
+      !draggingPatternRef.current ||
+      !isPatternEnabled ||
+      !activePatternMesh ||
+      !patternTransform ||
+      !onPatternTransformChange ||
+      !patternDragStartRef.current
+    ) {
+      return;
+    }
+
+    if (e?.object !== activePatternMesh) return;
+
+    e.stopPropagation();
+
+    if (e.uv) {
+      const start = patternDragStartRef.current;
+      if (!start) return;
+
+      // 1. ดึงค่ามุมหมุนปัจจุบัน (สมมติว่า patternRotation มีหน่วยเป็น Radian อยู่แล้ว)
+      // หากมุมส่งมาเป็น Degree ต้องแปลงเป็น Radian ก่อน: angle = patternRotation * (Math.PI / 180)
+      const angle = patternRotation || 0;
+
+      const currentZoom = patternTransform.zoom > 0 ? patternTransform.zoom : 1;
+
+      // 2. หา Delta เริ่มต้นใน UV Space ปกติ
+      const du = (e.uv.x - start.x) / currentZoom;
+      const dv = (e.uv.y - start.y) / currentZoom;
+
+      // 3. คำนวณชดเชยทิศทางด้วย Rotation Matrix
+      const cosA = Math.cos(angle);
+      const sinA = Math.sin(angle);
+
+      // ปรับหมุนแกน Delta ตามมุมของภาพ
+      const dx = (du * cosA + dv * sinA) * DRAG_SENSITIVITY;
+      const dy = (-du * sinA + dv * cosA) * DRAG_SENSITIVITY;
+
+      onPatternTransformChange({
+        ...patternTransform,
+        // หมายเหตุ: ขึ้นอยู่กับระบบแกนของโมเดล 3D หากพบว่าลากแล้วกลับด้าน (ลากขึ้นแต่ภาพลง) 
+        // ให้ลองเปลี่ยนจากเครื่องหมาย + เป็น - เช่น start.px - dx
+        x: Math.min(1, Math.max(0, start.px + dx)),
+        y: Math.min(1, Math.max(0, start.py + dy)),
+      });
+    }
+  };
+
+  const onPatternPointerUp = () => {
+    draggingPatternRef.current = false;
+    patternDragStartRef.current = null;
+  };
+
   return (
     <>
-      <group onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      <group
+        onPointerDown={(e) => {
+          onPointerDown(e);
+          onPatternPointerDown(e);
+        }}
+        onPointerMove={(e) => {
+          onPointerMove(e);
+          onPatternPointerMove(e);
+        }}
+        onPointerUp={() => {
+          onPointerUp();
+          onPatternPointerUp();
+        }}
+        // ⭐️ ป้องกันบั๊กเมาส์ค้างเวลาลากหลุดโมเดล
+        onPointerOut={() => {
+          onPointerUp();
+          onPatternPointerUp();
+        }}
+      >
         <primitive object={scene} />
       </group>
       <FitToObject object={scene} padding={1.25} />
@@ -1374,11 +1481,13 @@ export default function Plug3D({
   logoTransform,
   onLogoTransformChange,
   patternTransform,
+  onPatternTransformChange,
   patternRotation,
   patternBrightness = 0.75,
   patternOpacity = 1,
   patternFitMode = "contain",
   dragLogoMode = false,
+  dragPatternMode = false,
   renderMode = false,
   onRenderReady,
 }: Plug3DProps) {
@@ -1387,7 +1496,7 @@ export default function Plug3D({
   const controlsRef = useRef<any>(null);
 
   const cameraPos = useMemo(() => [0, 0.1, 3] as [number, number, number], []);
-  const lockControls = dragLogoMode || renderMode;
+  const lockControls = dragLogoMode || dragPatternMode || renderMode;
 
   return (
     <Canvas
@@ -1413,11 +1522,13 @@ export default function Plug3D({
           logoTransform={logoTransform}
           onLogoTransformChange={onLogoTransformChange}
           patternTransform={patternTransform}
+          onPatternTransformChange={onPatternTransformChange}
           patternRotation={patternRotation}
           patternBrightness={patternBrightness}
           patternOpacity={patternOpacity}
           patternFitMode={patternFitMode}
           dragLogoMode={dragLogoMode}
+          dragPatternMode={dragPatternMode}
           onRenderReady={onRenderReady}
           glRef={glRef}
           cameraRef={cameraRef}

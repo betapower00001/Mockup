@@ -113,10 +113,9 @@ function degToRad(d: number) {
 }
 
 function normalizeRad(r: number) {
-  // ให้อยู่ในช่วง (-PI..PI] เพื่อไม่ให้ค่าบวม
   const TWO_PI = Math.PI * 2;
-  let x = ((r % TWO_PI) + TWO_PI) % TWO_PI; // 0..2PI
-  if (x > Math.PI) x -= TWO_PI; // -PI..PI
+  let x = ((r % TWO_PI) + TWO_PI) % TWO_PI;
+  if (x > Math.PI) x -= TWO_PI;
   return x;
 }
 
@@ -132,11 +131,11 @@ export default function PlugCustomizer({ plugId }: Props) {
 
   const [customization, setCustomization] = useState<CustomizationState>(DEFAULT_CUSTOMIZATION);
   const [dragLogoMode, setDragLogoMode] = useState(false);
+  const [dragPatternMode, setDragPatternMode] = useState(false);
 
   const [logoTransform, setLogoTransform] = useState<LogoTransform>(DEFAULT_LOGO_TRANSFORM);
   const [patternTransform, setPatternTransform] = useState<PatternTransform>(DEFAULT_PATTERN_TRANSFORM);
 
-  // ✅ NEW: หมุนลาย (rad)
   const [patternRotation, setPatternRotation] = useState<number>(0);
 
   const [uploadedPatterns, setUploadedPatterns] = useState<string[]>([]);
@@ -146,7 +145,6 @@ export default function PlugCustomizer({ plugId }: Props) {
     [selectedPlugId, plug.modelPath]
   );
 
-  // ✅ FIX: ส่งเฉพาะสีที่อนุญาต + ไม่ส่ง switch ให้ TYPE-1 / TYPE-3
   const safeColors = useMemo(() => {
     const out: Partial<Record<ColorKey, string>> = {
       top: ensureAllowedColor(customization.topColor, ALLOWED_COLOR_OPTIONS),
@@ -178,6 +176,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     patchCustomization({ patternUrl: "" });
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
+    setDragPatternMode(false);
   }
 
   function resetAll() {
@@ -192,6 +191,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
     setDragLogoMode(false);
+    setDragPatternMode(false);
   }
 
   function handleLogoSelect(url: string) {
@@ -204,6 +204,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     patchCustomization({ patternUrl: base64 });
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
+    setDragPatternMode(false);
     setStep("pattern");
   }
 
@@ -228,6 +229,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
     setDragLogoMode(false);
+    setDragPatternMode(false);
     setUploadedPatterns([]);
     setStep("color");
   }
@@ -242,7 +244,6 @@ export default function PlugCustomizer({ plugId }: Props) {
     if (prev) setStep(prev);
   }
 
-  // ✅ UI helpers for pattern rotation
   function rotatePattern(deltaRad: number) {
     setPatternRotation((r) => normalizeRad(r + deltaRad));
   }
@@ -289,7 +290,6 @@ export default function PlugCustomizer({ plugId }: Props) {
               onColorChange={(c) => patchCustomization({ bottomColor: c })}
             />
 
-            {/* ✅ ซ่อนสวิตช์สำหรับ TYPE-1 และ TYPE-3 */}
             {selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && (
               <>
                 <div style={{ height: 10 }} />
@@ -321,7 +321,20 @@ export default function PlugCustomizer({ plugId }: Props) {
 
           <div className="divider" />
 
-          <div className="patternScroll" style={{ maxHeight: 320 }}>
+          <label className="row" style={{ gap: 8, marginTop: 10 }}>
+            <input
+              type="checkbox"
+              checked={dragPatternMode}
+              disabled={!hasPattern}
+              onChange={(e) => setDragPatternMode(e.target.checked)}
+            />
+            <span className="label" style={{ opacity: hasPattern ? 1 : 0.55 }}>
+              โหมดลากลาย (ลากบนโมเดลได้เลย)
+            </span>
+          </label>
+
+          {/* ⭐️ ปรับลด maxHeight ตรงนี้ให้เหลือ 220px เพื่อประหยัดพื้นที่ */}
+          <div className="patternScroll" style={{ maxHeight: 220, marginTop: 10 }}>
             <PatternPicker
               patternsForSelected={patterns[selectedPlugId] || []}
               uploadedExamples={uploadedPatterns}
@@ -329,6 +342,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 patchCustomization({ patternUrl: imgUrl });
                 setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
                 setPatternRotation(0);
+                setDragPatternMode(false);
               }}
               onUpload={handlePatternUpload}
               onReset={resetPattern}
@@ -557,7 +571,7 @@ export default function PlugCustomizer({ plugId }: Props) {
         <div className="label">มุมมอง</div>
         <div className="hint">เลือกมุมมองสำหรับโชว์/ดาวน์โหลด</div>
         <div style={{ marginTop: 10 }}>
-          <LayoutPreview view={customization.view} onSetView={(v) => patchCustomization({ view: v })} onDownload={() => {}} />
+          <LayoutPreview view={customization.view} onSetView={(v) => patchCustomization({ view: v })} onDownload={() => { }} />
         </div>
 
         <div className="divider" />
@@ -600,11 +614,13 @@ export default function PlugCustomizer({ plugId }: Props) {
                   logoUrl={customization.logoUrl}
                   patternUrl={customization.patternUrl}
                   patternTransform={patternTransform}
+                  onPatternTransformChange={setPatternTransform}
                   patternRotation={patternRotation}
                   colors={safeColors}
                   logoTransform={logoTransform}
                   onLogoTransformChange={setLogoTransform}
                   dragLogoMode={dragLogoMode && hasLogo}
+                  dragPatternMode={dragPatternMode && hasPattern}
                 />
               </div>
 
@@ -653,7 +669,10 @@ export default function PlugCustomizer({ plugId }: Props) {
               </div>
             </div>
 
-            <div className="body">
+            {/* ⭐️ ส่วนที่ปรับปรุง: เรียงซ้ายขวา (Stepper ซ้าย, Content ขวา) */}
+            <div className="body config-layout">
+
+              {/* ซ้าย: เมนูขั้นตอน 1-5 */}
               <div className="stepper">
                 {STEPS.map((s, idx) => {
                   const active = s.id === step;
@@ -672,25 +691,34 @@ export default function PlugCustomizer({ plugId }: Props) {
                 })}
               </div>
 
-              <div className="divider" />
+              {/* เส้นคั่นกลาง */}
+              <div className="config-divider" />
 
-              <div>{renderStepContent()}</div>
+              {/* ขวา: พื้นที่แสดงตัวเลือกของแต่ละขั้นตอน */}
+              <div className="config-content">
+                <div style={{ flex: 1, overflowY: "auto", paddingRight: 6 }}>
+                  {renderStepContent()}
+                </div>
 
-              <div className="divider" />
-
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <button type="button" className="btn btnGhost" onClick={goBack} disabled={currentStepIdx === 0}>
-                  ← ย้อนกลับ
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${currentStepIdx === STEPS.length - 1 ? "btnGhost" : "btnPrimary"}`}
-                  onClick={goNext}
-                  disabled={currentStepIdx === STEPS.length - 1}
-                >
-                  ถัดไป →
-                </button>
+                {/* ปุ่ม ย้อนกลับ / ถัดไป ให้อยู่ติดขอบล่างเสมอ */}
+                <div style={{ marginTop: 16 }}>
+                  <div className="divider" style={{ margin: "0 0 12px 0" }} />
+                  <div className="row" style={{ justifyContent: "space-between" }}>
+                    <button type="button" className="btn btnGhost" onClick={goBack} disabled={currentStepIdx === 0}>
+                      ← ย้อนกลับ
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${currentStepIdx === STEPS.length - 1 ? "btnGhost" : "btnPrimary"}`}
+                      onClick={goNext}
+                      disabled={currentStepIdx === STEPS.length - 1}
+                    >
+                      ถัดไป →
+                    </button>
+                  </div>
+                </div>
               </div>
+
             </div>
           </div>
         </div>
@@ -766,21 +794,54 @@ const CSS = `
       linear-gradient(180deg, #f7f9ff, #eef2ff 60%, #f8fafc);
   }
 
+  /* ⭐️ ขยายหน้าจอให้กว้างขึ้น และให้พื้นที่ฝั่งขวาเยอะขึ้น */
   .pc-grid{
-    max-width: 1280px;
+    max-width: 1440px; 
     margin: 0 auto;
     display: grid;
-    gap: 12px;
-    grid-template-columns: 1.62fr 1fr;
+    gap: 16px;
+    grid-template-columns: 1fr 1.4fr; /* Mockup ซ้าย 1 ส่วน : เครื่องมือขวา 1.4 ส่วน */
     align-items: start;
   }
 
   :root{ --mockH: 480px; }
   @media (max-height: 820px){ :root{ --mockH: 440px; } }
   @media (max-height: 740px){ :root{ --mockH: 400px; } }
+
+  /* ⭐️ เลย์เอาต์ใหม่ของการ์ดตั้งค่า (ซ้าย:เมนูขีด, กลาง:เส้น, ขวา:เนื้อหา) */
+  .config-layout {
+    display: grid;
+    grid-template-columns: 180px 1px 1fr;
+    gap: 16px;
+    min-height: var(--mockH); /* ให้สูงอย่างน้อยเท่ากับฝั่ง 3D Mockup */
+  }
+
+  /* เส้นคั่นแนวตั้ง */
+  .config-divider {
+    width: 1px;
+    background: rgba(226,232,240,.9);
+  }
+
+  .config-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
   @media (max-width: 1100px){
     .pc-grid{ grid-template-columns: 1fr; }
     .sticky{ position: static !important; }
+    
+    /* ถ้าย่อจอเล็กลงให้กลับไปเรียงบน-ล่างเหมือนเดิม */
+    .config-layout { 
+      grid-template-columns: 1fr; 
+      min-height: auto; 
+    }
+    .config-divider { 
+      width: 100%; 
+      height: 1px; 
+      margin: 4px 0; 
+    }
   }
 
   .card{
@@ -893,13 +954,13 @@ const CSS = `
     border: 1px solid rgba(148,163,184,.22);
   }
 
-  .stepper{ display: grid; gap: 8px; }
+  .stepper{ display: grid; gap: 8px; align-content: start; }
 
   .stepItem{
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px;
+    padding: 8px 10px;
     border-radius: 14px;
     border: 1px solid rgba(148,163,184,.28);
     background: rgba(255,255,255,.88);
@@ -940,7 +1001,22 @@ const CSS = `
     color: #0f172a;
   }
 
-  .patternScroll{ overflow: auto; padding-right: 6px; }
+  /* ⭐️ ปรับพื้นที่แสดงลวดลาย */
+  .patternScroll {
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 6px;
+  }
+
+  /* ⭐️ จัดเรียงกล่องรูปลายให้เป็น Grid แบบปรับจำนวนอัตโนมัติ (Auto-fill) ไม่ล็อก 3 คอลัมน์ */
+  .pattern-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); 
+    gap: 10px;
+    align-items: start;
+  }
+
+  /* ลบคำสั่ง .patternScroll button ออก เพื่อไม่ให้ไปบีบปุ่ม "อัปโหลด" และ "ล้างลาย" ให้พัง */
 
   .miniPad{
     display:grid;
@@ -984,4 +1060,5 @@ const CSS = `
   input[type="range"]{
     accent-color: #2563eb;
   }
+
 `;
