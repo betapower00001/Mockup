@@ -10,7 +10,7 @@ export interface PlugType {
 export const plugTypes: PlugType[] = [
   {
     id: "TYPE-1",
-    name: "Wallace",
+    name: "Arthur",
     thumb: "/plugs/TYPE-1/T-1.png",
     modelPath: "/models/plug/Un1.glb",
   },
@@ -34,7 +34,7 @@ export const plugTypes: PlugType[] = [
   },
     {
     id: "TYPE-5",
-    name: "Arthur",
+    name: "Wallace",
     thumb: "/plugs/TYPE-5/thumb.png",
     modelPath: "/models/plug/Un4.glb",
   },
