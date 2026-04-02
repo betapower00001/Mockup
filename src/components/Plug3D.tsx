@@ -4,11 +4,25 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Environment, OrbitControls, useGLTF, useTexture } from "@react-three/drei";
+import { suspend } from "suspend-react";
 import * as THREE from "three";
 import type { PlugModelConfig, ColorKey, UVProjection, UVSpace } from "../data/plugConfig";
 import type { LogoTransform } from "./PlugCustomizer";
 import FitToObject from "./FitToObject";
 import { useStickerTexture } from "./useStickerTexture";
+
+const cityEnv = import("@pmndrs/assets/hdri/city.exr").then((m) => m.default);
+
+export type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top";
+
+export type PlugRenderOptions = {
+  transparent?: boolean;
+  filename?: string;
+  view?: RenderViewName;
+  download?: boolean;
+};
+
+export type PlugRenderFn = (opts?: PlugRenderOptions) => Promise<string | null>;
 
 export type PatternTransform = {
   x: number; // 0..1
@@ -16,14 +30,23 @@ export type PatternTransform = {
   zoom: number; // 1.. (>=1 recommended)
 };
 
+// ✅ 1. เพิ่ม Type สำหรับรายการโลโก้
+export type LogoItem = {
+  id: string;
+  url: string;
+  transform: LogoTransform;
+};
+
 type Plug3DProps = {
   config: PlugModelConfig;
-  logoUrl?: string;
+
+  // ✅ 2. เปลี่ยนจาก logoUrl, logoTransform อันเดียว เป็น logos Array
+  logos?: LogoItem[];
+  activeLogoId?: string | null;
+  onLogoTransformChange?: (id: string, t: LogoTransform) => void;
+
   patternUrl?: string;
   colors: Partial<Record<ColorKey, string>>;
-
-  logoTransform?: LogoTransform;
-  onLogoTransformChange?: (t: LogoTransform) => void;
 
   patternTransform?: PatternTransform;
   onPatternTransformChange?: (t: PatternTransform) => void;
@@ -37,7 +60,8 @@ type Plug3DProps = {
   dragPatternMode?: boolean;
 
   renderMode?: boolean;
-  onRenderReady?: (render: (opts?: { transparent?: boolean; filename?: string }) => void) => void;
+  view?: "front" | "angle";
+  onRenderReady?: (render: PlugRenderFn) => void;
 };
 
 // ----------------------------------------------------
@@ -51,7 +75,10 @@ class EnvErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
-  componentDidCatch() { }
+  componentDidCatch(error: any, info: any) {
+    console.error("Environment failed:", error);
+    console.error(info?.componentStack);
+  }
   render() {
     if (this.state.hasError) return null;
     return this.props.children;
@@ -61,15 +88,69 @@ class EnvErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
 // -------------------------
 // Utils
 // -------------------------
+type CameraPose = {
+  position: THREE.Vector3;
+  target: THREE.Vector3;
+};
+
+function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName): CameraPose {
+  const box = new THREE.Box3().setFromObject(object);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+
+  const safeMax = Math.max(size.x, size.y, size.z, 1);
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitDist = (safeMax * 0.75) / Math.max(Math.tan(halfFov), 0.01);
+  const dist = Math.max(fitDist * 1.35, 2.2);
+  const lift = Math.max(size.y * 0.1, safeMax * 0.03);
+
+  const target = center.clone();
+  let dir = new THREE.Vector3(0, 0.1, 1);
+
+  switch (view) {
+    case "front":
+      dir = new THREE.Vector3(0, 0.06, 1);
+      break;
+    case "angle":
+      dir = new THREE.Vector3(0.95, 0.34, 1.1);
+      break;
+    case "left":
+      dir = new THREE.Vector3(-1, 0.14, 0);
+      break;
+    case "right":
+      dir = new THREE.Vector3(1, 0.14, 0);
+      break;
+    case "back":
+      dir = new THREE.Vector3(0, 0.08, -1);
+      break;
+    case "top":
+      dir = new THREE.Vector3(0, 1.45, 0.001);
+      break;
+  }
+
+  const position = center.clone().add(dir.normalize().multiplyScalar(dist));
+  position.y += lift;
+
+  return { position, target };
+}
+
+function applyCameraPose(camera: THREE.PerspectiveCamera, pose: CameraPose) {
+  camera.position.copy(pose.position);
+  camera.lookAt(pose.target);
+  camera.updateProjectionMatrix();
+}
+
+function waitNextFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 function normalizeHex(hex?: string): string | null {
   if (!hex) return null;
   const h = hex.trim();
   if (!h.startsWith("#")) return null;
   if (h.length === 9) return h.slice(0, 7);
   if (h.length === 4) {
-    const r = h[1],
-      g = h[2],
-      b = h[3];
+    const r = h[1], g = h[2], b = h[3];
     return `#${r}${r}${g}${g}${b}${b}`;
   }
   if (h.length === 7) return h;
@@ -99,10 +180,7 @@ function averageColorFromImage(img: any, sample = 64) {
   }
 
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  let r = 0,
-    g = 0,
-    b = 0,
-    n = 0;
+  let r = 0, g = 0, b = 0, n = 0;
 
   for (let i = 0; i < data.length; i += 4) {
     const a = data[i + 3];
@@ -284,8 +362,7 @@ function ensurePlanarUV(
     const y = pos.getY(i);
     const z = pos.getZ(i);
 
-    let u = 0,
-      v = 0;
+    let u = 0, v = 0;
 
     if (useAxes === "XY") {
       u = (x - bb.min.x) / dx;
@@ -339,10 +416,7 @@ function ensurePlanarUVByNormal(mesh: THREE.Mesh, flipU?: boolean, flipV?: boole
   const b = new THREE.Vector3().crossVectors(n, t).normalize();
 
   const tmpP = new THREE.Vector3();
-  let minU = Infinity,
-    maxU = -Infinity,
-    minV = Infinity,
-    maxV = -Infinity;
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
 
   for (let i = 0; i < pos.count; i++) {
     tmpP.set(pos.getX(i), pos.getY(i), pos.getZ(i));
@@ -486,8 +560,7 @@ function ensureWorldPlanarUV(args: {
     if (alignMatrix) vAligned.copy(vWorld).applyMatrix4(alignMatrix);
     else vAligned.copy(vWorld);
 
-    let u = 0,
-      v = 0;
+    let u = 0, v = 0;
 
     if (useAxes === "XY") {
       u = (vAligned.x - bb.min.x) / dx;
@@ -807,15 +880,151 @@ function applyPatternToMesh(args: {
 }
 
 // ======================================================
+// ✅ 3. Logo Layer Component (TYPE-4 ถูกแยกแล้ว!)
+// ======================================================
+function LogoLayer({
+  logoMesh,
+  config,
+  logo,
+  index,
+}: {
+  logoMesh: THREE.Mesh;
+  config: PlugModelConfig;
+  logo: LogoItem;
+  index: number;
+}) {
+  // ✅ แก้เฉพาะ TYPE-4 โดยไม่กระทบ TYPE อื่น
+  const isType3 = config.id === "TYPE-3";
+  const isType4 = config.id === "TYPE-4";
+  const isFixedLogoType = isType3 || isType4;
+
+  const stickerTex = useStickerTexture(
+    logo.url,
+    logo.transform
+      ? {
+        x: isFixedLogoType ? 0 : logo.transform.x,
+        y: isFixedLogoType ? 0 : logo.transform.y,
+        scale: isFixedLogoType
+          ? 1
+          : Array.isArray(logo.transform.scale)
+            ? logo.transform.scale[0]
+            : (logo.transform.scale as any),
+        rot: isFixedLogoType ? 0 : logo.transform.rot,
+      }
+      : undefined
+  );
+
+  useEffect(() => {
+    if (!logoMesh || !logo.url || !stickerTex) return;
+
+    const overlayName = `__LOGO_OVERLAY_${logo.id}__`;
+    const old = logoMesh.getObjectByName(overlayName);
+    if (old) old.parent?.remove(old);
+
+    if (isFixedLogoType) {
+      let du = 1, dv = 1;
+      logoMesh.geometry.computeBoundingBox();
+      const s = new THREE.Vector3();
+      logoMesh.geometry.boundingBox?.getSize(s);
+
+      const proj: UVProjection = isType4 ? "XZ" : (config.decal.uvProjection || "XZ");
+      if (proj === "XY") {
+        du = s.x; dv = s.y;
+      } else if (proj === "XZ") {
+        du = s.x; dv = s.z;
+      } else {
+        du = s.y; dv = s.z;
+      }
+
+      du = Math.max(0.001, du);
+      dv = Math.max(0.001, dv);
+
+      const maxDim = Math.max(du, dv);
+      const normX = du / maxDim;
+      const normY = dv / maxDim;
+
+      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
+      const rotUI = logo.transform?.rot ?? 0;
+      const totalRot = rotConfig + rotUI;
+
+      const px = logo.transform?.x ?? 0;
+      const py = logo.transform?.y ?? 0;
+
+      let uiScale = 1;
+      if (logo.transform?.scale !== undefined) {
+        uiScale = Array.isArray(logo.transform.scale) ? logo.transform.scale[0] : logo.transform.scale;
+      }
+
+      stickerTex.matrixAutoUpdate = false;
+      stickerTex.matrix
+        .identity()
+        .translate(-0.5 - px, -0.5 - py)
+        .scale(normX, normY)
+        .rotate(totalRot)
+        .scale(1 / uiScale, 1 / uiScale)
+        .translate(0.5, 0.5);
+    } else {
+      // ✅ TYPE อื่นๆ ใช้ค่าแบบมาตรฐานเหมือนเดิม
+      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
+      stickerTex.matrixAutoUpdate = false;
+      stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(rotConfig).translate(0.5, 0.5);
+    }
+
+    stickerTex.flipY = false;
+    stickerTex.needsUpdate = true;
+
+    const overlayMat = new THREE.MeshBasicMaterial({
+      map: stickerTex,
+      transparent: true,
+      opacity: 1,
+      alphaTest: 0.01,
+      depthTest: true,
+      depthWrite: false,
+    });
+
+    overlayMat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        `#include <map_fragment>`,
+        `
+        #include <map_fragment>
+        #ifdef USE_MAP
+          if (vMapUv.x < 0.001 || vMapUv.x > 0.999 || vMapUv.y < 0.001 || vMapUv.y > 0.999) {
+              diffuseColor.a = 0.0; 
+          }
+        #endif
+        `
+      );
+    };
+
+    overlayMat.polygonOffset = true;
+    overlayMat.polygonOffsetFactor = -2 - index;
+    overlayMat.polygonOffsetUnits = -2 - index;
+
+    const overlay = new THREE.Mesh(logoMesh.geometry, overlayMat);
+    overlay.name = overlayName;
+    overlay.renderOrder = 999 + index;
+
+    logoMesh.add(overlay);
+
+    return () => {
+      overlay.parent?.remove(overlay);
+      overlayMat.dispose();
+    };
+  }, [logoMesh, stickerTex, logo, config, index, isType3, isType4, isFixedLogoType]);
+
+  return null;
+}
+
+// ======================================================
 // Scene
 // ======================================================
 function PlugScene({
   config,
-  logoUrl,
+  logos,
+  activeLogoId,
+  onLogoTransformChange,
   patternUrl,
   colors,
-  logoTransform,
-  onLogoTransformChange,
   patternTransform,
   onPatternTransformChange,
   patternRotation,
@@ -824,16 +1033,17 @@ function PlugScene({
   patternFitMode,
   dragLogoMode,
   dragPatternMode,
+  view,
   onRenderReady,
   glRef,
   cameraRef,
 }: {
   config: PlugModelConfig;
-  logoUrl?: string;
+  logos?: LogoItem[];
+  activeLogoId?: string | null;
+  onLogoTransformChange?: (id: string, t: LogoTransform) => void;
   patternUrl?: string;
   colors: Partial<Record<ColorKey, string>>;
-  logoTransform?: LogoTransform;
-  onLogoTransformChange?: (t: LogoTransform) => void;
   patternTransform?: PatternTransform;
   onPatternTransformChange?: (t: PatternTransform) => void;
   patternRotation?: number;
@@ -842,6 +1052,7 @@ function PlugScene({
   patternFitMode?: "contain" | "cover";
   dragLogoMode?: boolean;
   dragPatternMode?: boolean;
+  view?: Plug3DProps["view"];
   onRenderReady?: Plug3DProps["onRenderReady"];
   glRef: React.MutableRefObject<THREE.WebGLRenderer | null>;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
@@ -864,7 +1075,7 @@ function PlugScene({
     return getWorldAlignMatrixFromRef(scene, config.patternWorldRefMesh);
   }, [scene, wantsWorld, config.patternWorldRefMesh]);
 
-  const isFixedType = config.id === "TYPE-2" || config.id === "TYPE-3";
+  const isFixedType = config.id === "TYPE-2" || config.id === "TYPE-3" || config.id === "TYPE-4";
 
   const fixedWorldAxes = useMemo<UVProjection | null>(() => {
     if (!isFixedType) return null;
@@ -877,9 +1088,19 @@ function PlugScene({
     const m = findMeshByName(scene, config.decal.meshName);
 
     if (m) {
-      const isType3 = config.id === "TYPE-3";
-      if (isType3) {
+      // ✅ 🌟 แยกการจัดการ TYPE-4 ออกมาโดยเฉพาะ
+      if (config.id === "TYPE-3") {
         ensurePlanarUVByNormal(m, config.decal.flipU, config.decal.flipV, true);
+      } else if (config.id === "TYPE-4") {
+        // TYPE-4 บังคับใช้แกน XZ ใน Plug3D เท่านั้น โดยไม่แตะ TYPE อื่น
+        ensurePlanarUV(
+          m,
+          "XZ",
+          config.decal.flipU,
+          config.decal.flipV,
+          true,
+          true
+        );
       } else {
         ensurePlanarUV(
           m,
@@ -1004,23 +1225,6 @@ function PlugScene({
     patternWorldAlign,
     fixedWorldAxes,
   ]);
-
-  const stickerTex = useStickerTexture(
-    logoUrl,
-    logoTransform
-      ? {
-        x: config.id === "TYPE-3" ? 0 : logoTransform.x,
-        y: config.id === "TYPE-3" ? 0 : logoTransform.y,
-        scale:
-          config.id === "TYPE-3"
-            ? 1
-            : Array.isArray(logoTransform.scale)
-              ? logoTransform.scale[0]
-              : (logoTransform.scale as any),
-        rot: config.id === "TYPE-3" ? 0 : logoTransform.rot,
-      }
-      : undefined
-  );
 
   const FALLBACK_TRANSPARENT_PNG =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Q3n8AAAAASUVORK5CYII=";
@@ -1157,8 +1361,11 @@ function PlugScene({
     fixedWorldAxes,
   ]);
 
+  const ENABLE_PATTERN_SIDE_TINT = false;
+
   // side enabled=false -> tint material
   useEffect(() => {
+    if (!ENABLE_PATTERN_SIDE_TINT) return;
     if (!patternSideMesh) return;
 
     const enabled = config.patternSideDecal?.enablePattern ?? true;
@@ -1171,7 +1378,10 @@ function PlugScene({
 
     const toned = mixRgb(avg, { r: 255, g: 255, b: 255 }, 0.25);
 
-    const mats = Array.isArray(patternSideMesh.material) ? patternSideMesh.material : [patternSideMesh.material];
+    const mats = Array.isArray(patternSideMesh.material)
+      ? patternSideMesh.material
+      : [patternSideMesh.material];
+
     const cloned = mats.map((m: any) => (m?.clone ? m.clone() : m));
 
     cloned.forEach((m: any) => {
@@ -1189,137 +1399,68 @@ function PlugScene({
         } catch { }
       });
     };
-  }, [patternSideMesh, config.id, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
+  }, [patternSideMesh, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
-  // ✅ Universal Logo Matrix
   useEffect(() => {
-    if (!logoMesh) return;
+    const camera = cameraRef.current;
+    if (!camera) return;
 
-    const old = logoMesh.getObjectByName("__LOGO_OVERLAY__");
-    if (old) old.parent?.remove(old);
-
-    if (!logoUrl || !stickerTex) return;
-
-    if (config.id === "TYPE-3") {
-      let du = 1,
-        dv = 1;
-      logoMesh.geometry.computeBoundingBox();
-      const s = new THREE.Vector3();
-      logoMesh.geometry.boundingBox?.getSize(s);
-
-      const proj = config.decal.uvProjection || "XZ";
-      if (proj === "XY") {
-        du = s.x;
-        dv = s.y;
-      } else if (proj === "XZ") {
-        du = s.x;
-        dv = s.z;
-      } else {
-        du = s.y;
-        dv = s.z;
-      }
-
-      du = Math.max(0.001, du);
-      dv = Math.max(0.001, dv);
-
-      const maxDim = Math.max(du, dv);
-      const normX = du / maxDim;
-      const normY = dv / maxDim;
-
-      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
-      const rotUI = logoTransform?.rot ?? 0;
-      const totalRot = rotConfig + rotUI;
-
-      const px = logoTransform?.x ?? 0;
-      const py = logoTransform?.y ?? 0;
-
-      let uiScale = 1;
-      if (logoTransform?.scale !== undefined) {
-        uiScale = Array.isArray(logoTransform.scale) ? logoTransform.scale[0] : logoTransform.scale;
-      }
-
-      stickerTex.matrixAutoUpdate = false;
-      stickerTex.matrix
-        .identity()
-        .translate(-0.5 - px, -0.5 - py)
-        .scale(normX, normY)
-        .rotate(totalRot)
-        .scale(1 / uiScale, 1 / uiScale)
-        .translate(0.5, 0.5);
-    } else {
-      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
-      stickerTex.matrixAutoUpdate = false;
-      stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(rotConfig).translate(0.5, 0.5);
-    }
-
-    stickerTex.flipY = false;
-    stickerTex.needsUpdate = true;
-
-    const overlayMat = new THREE.MeshBasicMaterial({
-      map: stickerTex,
-      transparent: true,
-      opacity: 1,
-      alphaTest: 0.01,
-      depthTest: true,
-      depthWrite: false,
-    });
-
-    overlayMat.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        `#include <map_fragment>`,
-        `
-        #include <map_fragment>
-        #ifdef USE_MAP
-          if (vMapUv.x < 0.001 || vMapUv.x > 0.999 || vMapUv.y < 0.001 || vMapUv.y > 0.999) {
-              diffuseColor.a = 0.0; 
-          }
-        #endif
-        `
-      );
-    };
-
-    overlayMat.polygonOffset = true;
-    overlayMat.polygonOffsetFactor = -2;
-    overlayMat.polygonOffsetUnits = -2;
-
-    const overlay = new THREE.Mesh(logoMesh.geometry, overlayMat);
-    overlay.name = "__LOGO_OVERLAY__";
-    overlay.renderOrder = 999;
-
-    logoMesh.add(overlay);
-
-    return () => {
-      overlay.parent?.remove(overlay);
-      overlayMat.dispose();
-    };
-  }, [logoMesh, stickerTex, logoUrl, logoTransform, config]);
+    const pose = getSceneCameraPose(scene, camera, view ?? "angle");
+    applyCameraPose(camera, pose);
+  }, [scene, cameraRef, view]);
 
   // render
   useEffect(() => {
     if (!onRenderReady) return;
 
-    onRenderReady((opts?: { transparent?: boolean; filename?: string }) => {
+    onRenderReady(async (opts?: PlugRenderOptions) => {
       const gl = glRef.current;
       const camera = cameraRef.current;
-      if (!gl || !camera) return;
+      if (!gl || !camera) return null;
 
       const transparent = opts?.transparent ?? false;
       const filename = opts?.filename ?? "render.png";
+      const shouldDownload = opts?.download ?? true;
 
       const oldClearColor = new THREE.Color();
       gl.getClearColor(oldClearColor);
       const oldClearAlpha = gl.getClearAlpha();
 
-      gl.setClearColor(0xf5f5f7, transparent ? 0 : 1);
-      gl.render(scene as any, camera);
+      const oldPos = camera.position.clone();
+      const oldQuat = camera.quaternion.clone();
+      const oldUp = camera.up.clone();
+      const oldZoom = camera.zoom;
 
-      const dataURL = gl.domElement.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataURL;
-      a.download = filename;
-      a.click();
+      try {
+        if (opts?.view) {
+          const pose = getSceneCameraPose(scene, camera, opts.view);
+          applyCameraPose(camera, pose);
+          await waitNextFrame();
+        }
 
-      gl.setClearColor(oldClearColor, oldClearAlpha);
+        gl.setClearColor(0xffffff, transparent ? 0 : 1);
+        gl.render(scene as any, camera);
+
+        const dataURL = gl.domElement.toDataURL("image/png");
+
+        if (shouldDownload) {
+          const a = document.createElement("a");
+          a.href = dataURL;
+          a.download = filename;
+          a.click();
+        }
+
+        return dataURL;
+      } finally {
+        camera.position.copy(oldPos);
+        camera.quaternion.copy(oldQuat);
+        camera.up.copy(oldUp);
+        camera.zoom = oldZoom;
+        camera.updateProjectionMatrix();
+
+        gl.setClearColor(oldClearColor, oldClearAlpha);
+        gl.render(scene as any, camera);
+      }
     });
   }, [onRenderReady, glRef, cameraRef, scene]);
 
@@ -1327,37 +1468,40 @@ function PlugScene({
   const draggingPatternRef = useRef(false);
   const patternDragStartRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
 
+  // ✅ 4. จัดการ Drag & Drop ของโลโก้
+  const activeLogo = logos?.find((l) => l.id === activeLogoId);
+
   const onPointerDown = (e: any) => {
-    if (!dragLogoMode || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange) return;
+    if (!dragLogoMode || !activeLogo || !logoMesh || !onLogoTransformChange) return;
     if (e?.object !== logoMesh) return;
 
     e.stopPropagation();
     draggingRef.current = true;
 
     if (e.uv) {
-      const isType3 = config.id === "TYPE-3";
-
-      onLogoTransformChange({
-        ...logoTransform,
+      // ✅ TYPE-4 ใช้แกนทิศเดียวกับ TYPE-3 เฉพาะการลากโลโก้
+      const isFixedLogoType = config.id === "TYPE-3" || config.id === "TYPE-4";
+      onLogoTransformChange(activeLogo.id, {
+        ...activeLogo.transform,
         x: e.uv.x - 0.5,
-        y: isType3 ? e.uv.y - 0.5 : 0.5 - e.uv.y,
+        y: isFixedLogoType ? e.uv.y - 0.5 : 0.5 - e.uv.y,
       });
     }
   };
 
   const onPointerMove = (e: any) => {
-    if (!dragLogoMode || !draggingRef.current || !logoUrl || !logoMesh || !logoTransform || !onLogoTransformChange) return;
+    if (!dragLogoMode || !draggingRef.current || !activeLogo || !logoMesh || !onLogoTransformChange) return;
     if (e?.object !== logoMesh) return;
 
     e.stopPropagation();
 
     if (e.uv) {
-      const isType3 = config.id === "TYPE-3";
-
-      onLogoTransformChange({
-        ...logoTransform,
+      // ✅ TYPE-4 ใช้แกนทิศเดียวกับ TYPE-3 เฉพาะการลากโลโก้
+      const isFixedLogoType = config.id === "TYPE-3" || config.id === "TYPE-4";
+      onLogoTransformChange(activeLogo.id, {
+        ...activeLogo.transform,
         x: e.uv.x - 0.5,
-        y: isType3 ? e.uv.y - 0.5 : 0.5 - e.uv.y,
+        y: isFixedLogoType ? e.uv.y - 0.5 : 0.5 - e.uv.y,
       });
     }
   };
@@ -1377,8 +1521,6 @@ function PlugScene({
     if (e?.object !== activePatternMesh) return;
 
     e.stopPropagation();
-
-    // แบบ Hold & Drag (ถ้าอยากได้คลิกเปิด/ปิด ให้เปลี่ยนเป็น draggingPatternRef.current = !draggingPatternRef.current)
     draggingPatternRef.current = true;
 
     if (e.uv) {
@@ -1412,28 +1554,20 @@ function PlugScene({
       const start = patternDragStartRef.current;
       if (!start) return;
 
-      // 1. ดึงค่ามุมหมุนปัจจุบัน (สมมติว่า patternRotation มีหน่วยเป็น Radian อยู่แล้ว)
-      // หากมุมส่งมาเป็น Degree ต้องแปลงเป็น Radian ก่อน: angle = patternRotation * (Math.PI / 180)
       const angle = patternRotation || 0;
-
       const currentZoom = patternTransform.zoom > 0 ? patternTransform.zoom : 1;
 
-      // 2. หา Delta เริ่มต้นใน UV Space ปกติ
       const du = (e.uv.x - start.x) / currentZoom;
       const dv = (e.uv.y - start.y) / currentZoom;
 
-      // 3. คำนวณชดเชยทิศทางด้วย Rotation Matrix
       const cosA = Math.cos(angle);
       const sinA = Math.sin(angle);
 
-      // ปรับหมุนแกน Delta ตามมุมของภาพ
       const dx = (du * cosA + dv * sinA) * DRAG_SENSITIVITY;
       const dy = (-du * sinA + dv * cosA) * DRAG_SENSITIVITY;
 
       onPatternTransformChange({
         ...patternTransform,
-        // หมายเหตุ: ขึ้นอยู่กับระบบแกนของโมเดล 3D หากพบว่าลากแล้วกลับด้าน (ลากขึ้นแต่ภาพลง) 
-        // ให้ลองเปลี่ยนจากเครื่องหมาย + เป็น - เช่น start.px - dx
         x: Math.min(1, Math.max(0, start.px + dx)),
         y: Math.min(1, Math.max(0, start.py + dy)),
       });
@@ -1460,26 +1594,38 @@ function PlugScene({
           onPointerUp();
           onPatternPointerUp();
         }}
-        // ⭐️ ป้องกันบั๊กเมาส์ค้างเวลาลากหลุดโมเดล
         onPointerOut={() => {
           onPointerUp();
           onPatternPointerUp();
         }}
       >
         <primitive object={scene} />
+
+        {logoMesh && logos?.map((logo, index) => (
+          // ⛔ เช็คดักไว้เลย! ถ้ามี url ค่อย Render ถ้าไม่มีให้เป็น null ไปเลย
+          logo.url ? (
+            <LogoLayer
+              key={logo.id}
+              logoMesh={logoMesh}
+              config={config}
+              logo={logo}
+              index={index}
+            />
+          ) : null
+        ))}
       </group>
-      <FitToObject object={scene} padding={1.25} />
+      <FitToObject object={scene} padding={2.01} />
     </>
   );
 }
 
 export default function Plug3D({
   config,
-  logoUrl,
+  logos,
+  activeLogoId,
+  onLogoTransformChange,
   patternUrl,
   colors,
-  logoTransform,
-  onLogoTransformChange,
   patternTransform,
   onPatternTransformChange,
   patternRotation,
@@ -1489,6 +1635,7 @@ export default function Plug3D({
   dragLogoMode = false,
   dragPatternMode = false,
   renderMode = false,
+  view = "angle",
   onRenderReady,
 }: Plug3DProps) {
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -1502,7 +1649,9 @@ export default function Plug3D({
     <Canvas
       gl={{ preserveDrawingBuffer: true, antialias: true, alpha: true }}
       camera={{ position: cameraPos, fov: 45 }}
-      style={{ background: "#f5f5f7" }}
+      style={{
+        background: "linear-gradient(180deg, #e0eaff 0%, #ffffff 100%)",
+      }}
       onCreated={({ gl, camera }) => {
         glRef.current = gl;
         cameraRef.current = camera as THREE.PerspectiveCamera;
@@ -1516,11 +1665,11 @@ export default function Plug3D({
       <Suspense fallback={null}>
         <PlugScene
           config={config}
-          logoUrl={logoUrl}
+          logos={logos}
+          activeLogoId={activeLogoId}
+          onLogoTransformChange={onLogoTransformChange}
           patternUrl={patternUrl}
           colors={colors}
-          logoTransform={logoTransform}
-          onLogoTransformChange={onLogoTransformChange}
           patternTransform={patternTransform}
           onPatternTransformChange={onPatternTransformChange}
           patternRotation={patternRotation}
@@ -1529,14 +1678,19 @@ export default function Plug3D({
           patternFitMode={patternFitMode}
           dragLogoMode={dragLogoMode}
           dragPatternMode={dragPatternMode}
+          view={view}
           onRenderReady={onRenderReady}
           glRef={glRef}
           cameraRef={cameraRef}
         />
 
         <EnvErrorBoundary>
-          <Environment preset="apartment" environmentIntensity={0.18} />
+          <Environment
+            files={suspend(cityEnv) as string}
+            environmentIntensity={0.35}
+          />
         </EnvErrorBoundary>
+
       </Suspense>
 
       <OrbitControls

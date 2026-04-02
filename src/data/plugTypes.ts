@@ -28,13 +28,13 @@ export const plugTypes: PlugType[] = [
   },
   {
     id: "TYPE-4",
-    name: "US / UK",
-    thumb: "/plugs/TYPE-4/thumb.png",
+    name: "Mulan",
+    thumb: "/plugs/TYPE-4/T-4.png",
     modelPath: "/models/plug/Un4.glb",
   },
     {
     id: "TYPE-5",
-    name: "US / UK",
+    name: "Hector",
     thumb: "/plugs/TYPE-5/thumb.png",
     modelPath: "/models/plug/Un4.glb",
   },

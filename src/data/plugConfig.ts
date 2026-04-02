@@ -3,6 +3,7 @@
 export type ColorKey = "top" | "bottom" | "switch" | "body";
 export type UVProjection = "XY" | "XZ" | "YZ";
 export type UVSpace = "local" | "world";
+export type fitMode = "contain" | "cover";
 
 export type DecalConfig = {
   meshName: string;
@@ -34,6 +35,9 @@ export type DecalConfig = {
 
   // ✅ NEW: กัน “แกนเอียง/แกนไม่ตรง” โดยล็อคแกน world จาก ref mesh
   worldAlign?: boolean; // default = true
+
+  // ✅ เติมตรงนี้เพื่อให้ระบบรู้จักคำสั่ง fitMode ในแต่ละ TYPE
+  fitMode?: fitMode;
 };
 
 // ✅ ตัวเลือกสำหรับ TRIPLANAR (ใช้กับ "ลาย" เท่านั้น)
@@ -61,6 +65,10 @@ export type PlugModelConfig = {
 };
 
 export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
+
+  // ==========================================================
+  // ✅ TYPE-1 (แก้จุดสลับซ้าย-ขวา)
+  // ==========================================================
   "TYPE-1": {
     id: "TYPE-1",
     modelPath: "/models/plug/Un1.glb",
@@ -94,6 +102,10 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       useTriplanar: false,
     },
   },
+
+  // ==========================================================
+  // ✅ TYPE-2 
+  // ==========================================================
 
   "TYPE-2": {
     id: "TYPE-2",
@@ -181,12 +193,12 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       position: [0, 0, 0.002],
 
       // ✅ ตั้งให้ตรง ไม่ต้องหมุนแล้ว
-      rotation: [0, 0, 0], 
+      rotation: [0, 0, 0],
 
       scale: [0.08, 0.08, 0.08],
-      
+
       // ✅ ใช้ XZ เป็นแกนหลักสำหรับพื้นผิวระนาบบน
-      uvProjection: "XZ", 
+      uvProjection: "XZ",
       uvSpace: "local",
 
       // ✅ เอา Flip ออก ตัวอักษรจะได้ไม่กลับซ้ายขวา
@@ -217,6 +229,78 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
 
     patternSideDecal: {
       meshName: "Top_Side",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 0],
+      scale: 0.35,
+      uvProjection: "XZ",
+      flipU: true,
+      flipV: false,
+      uvSpace: "world",
+      forceUV: true,
+      lockAxes: true,
+      enablePattern: false,
+      worldAlign: true,
+    },
+
+    patternTriplanar: {
+      scale: 2.5,
+      blend: 6.0,
+      seed: 1.0,
+    },
+  },
+
+  // ==========================================================
+  // ✅ TYPE-4 
+  // ==========================================================
+  "TYPE-4": {
+    id: "TYPE-4",
+    modelPath: "/models/plug/Un4.glb",
+
+    colorTargets: {
+      top: [
+        "Top_Side", "mat__top_Side", "topstone v2", "250201 v0.001",
+        "Bottom", "mat_bottom", "Part2", "Part3^Assem1",
+        "220108 cover shuter", "220108 cover shuter001",
+        "Ck Cord rewise STI 30-03-18", "PART TIS-04-1(0.5mm).001"
+      ],
+      bottom: [],
+      switch: [],
+    },
+
+    patternWorldBBoxMeshes: ["Top_Side"],
+    patternWorldRefMesh: "Top_Side",
+
+    decal: {
+      meshName: "Top_Side",
+      position: [0, 0, 0.005],
+      rotation: [0, 0, 0],
+      scale: [0.08, 0.08, 0.08],
+      uvProjection: "XZ", // เดิมเป็น "XY"
+      uvSpace: "local",
+      flipU: false,
+      flipV: false,
+      forceUV: true,
+      lockAxes: true,
+    },
+
+    patternDecal: {
+      meshName: "Top_Side",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 1.5708],
+      scale: 0.35,
+      uvProjection: "XZ",
+      uvSpace: "world",
+      forceUV: true,
+      lockAxes: true,
+      flipU: false,
+      flipV: true,
+      patternRotation: 0,
+      enablePattern: true,
+      worldAlign: true,
+    },
+
+    patternSideDecal: {
+      meshName: "Bottom",
       position: [0, 0, 0.002],
       rotation: [0, 0, 0],
       scale: 0.35,

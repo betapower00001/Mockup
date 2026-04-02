@@ -1,10 +1,10 @@
 // src/components/PlugCustomizer.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import plugTypes from "../data/plugTypes";
 import patterns from "../data/patterns";
-import Plug3D, { PatternTransform } from "./Plug3D";
+import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName } from "./Plug3D";
 import ColorPicker from "./ColorPicker";
 import PlugSelector from "./PlugSelector";
 import PatternPicker from "./PatternPicker";
@@ -25,7 +25,6 @@ interface CustomizationState {
   bottomColor: string;
   switchColor: string;
   patternUrl: string; // "" = ไม่มีลาย
-  logoUrl?: string;
   view: "front" | "angle";
 }
 
@@ -34,6 +33,13 @@ export type LogoTransform = {
   y: number;
   scale: number;
   rot: number;
+};
+
+// ✅ เพิ่ม Type สำหรับเก็บข้อมูล 3 โลโก้
+export type LogoItem = {
+  id: string;
+  url: string;
+  transform: LogoTransform;
 };
 
 type StepId = "model" | "color" | "pattern" | "logo" | "view";
@@ -46,7 +52,7 @@ const STEPS: { id: StepId; title: string; sub: string }[] = [
   { id: "model", title: "1) เลือกรุ่น", sub: "เลือกรุ่นปลั๊กที่ต้องการ" },
   { id: "color", title: "2) เลือกสี", sub: "ปรับสีฝาบน/ฝาล่าง" },
   { id: "pattern", title: "3) เลือกลาย", sub: "เลือกลวดลาย + เลื่อน/ซูม/หมุน" },
-  { id: "logo", title: "4) ใส่โลโก้", sub: "อัปโหลด + ปรับตำแหน่ง/ขนาด" },
+  { id: "logo", title: "4) ใส่โลโก้", sub: "อัปโหลด 3 ตำแหน่ง + ปรับแต่ง" }, // อัปเดตข้อความ
   { id: "view", title: "5) มุมมอง", sub: "เลือกมุมมองสำหรับโชว์/ดาวน์โหลด" },
 ];
 
@@ -55,7 +61,6 @@ const DEFAULT_CUSTOMIZATION: CustomizationState = {
   bottomColor: "#eaeaea",
   switchColor: "#ffffff",
   patternUrl: "",
-  logoUrl: undefined,
   view: "angle",
 };
 
@@ -66,21 +71,160 @@ const DEFAULT_LOGO_TRANSFORM: LogoTransform = {
   rot: 0,
 };
 
+// ✅ ค่าเริ่มต้นของโลโก้ทั้ง 3 ช่อง
+const DEFAULT_LOGOS: LogoItem[] = [
+  { id: "logo-1", url: "", transform: { ...DEFAULT_LOGO_TRANSFORM } },
+  { id: "logo-2", url: "", transform: { ...DEFAULT_LOGO_TRANSFORM } },
+  { id: "logo-3", url: "", transform: { ...DEFAULT_LOGO_TRANSFORM } },
+];
+
 const DEFAULT_PATTERN_TRANSFORM: PatternTransform = {
   x: 0.5,
   y: 0.5,
   zoom: 1,
 };
 
-const ALLOWED_COLOR_OPTIONS = [
+type ColorOption = { label: string; value: string };
+type TypeColorOptions = {
+  top: ColorOption[];
+  bottom: ColorOption[];
+  switch: ColorOption[];
+};
+
+const COMMON_COLORS: ColorOption[] = [
   { label: "ขาว", value: "#ffffff" },
   { label: "ดำ", value: "#111111" },
-  { label: "เทาอ่อน", value: "#d9d9d9" },
-  { label: "เทาเข้ม", value: "#7a7a7a" },
-  { label: "ครีม", value: "#f3ead8" },
-  { label: "เบจ", value: "#d6c2a1" },
-  { label: "น้ำเงิน", value: "#1d4ed8" },
-  { label: "กรม", value: "#1e293b" },
+  { label: "ส้ม", value: "#ec3b27" },
+  { label: "แดง", value: "#ed1b24" },
+  { label: "กรมท่า", value: "#181d47" },
+  { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+  { label: "เขียวพาสเทล", value: "#62c2a6" },
+  { label: "เหลือง", value: "#ffc813" },
+  { label: "ชมพู", value: "#f37c8f" },
+
+];
+
+const TYPE_COLOR_OPTIONS: Record<string, TypeColorOptions> = {
+  "TYPE-1": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ed1b24" },
+      { label: "กรมท่า", value: "#181d47" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ed1b24" },
+      { label: "กรมท่า", value: "#181d47" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+    ],
+    switch: COMMON_COLORS,
+  },
+
+  "TYPE-2": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ed1b24" },
+      { label: "กรมท่า", value: "#181d47" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ed1b24" },
+      { label: "กรมท่า", value: "#181d47" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+    ],
+    switch: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ed1b24" },
+      { label: "กรมท่า", value: "#181d47" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+    ],
+  },
+
+  "TYPE-3": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ed1b24" },
+      { label: "กรมท่า", value: "#181d47" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ed1b24" },
+      { label: "กรมท่า", value: "#181d47" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+    ],
+    switch: COMMON_COLORS,
+  },
+
+  "TYPE-4": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ฟ้าพาสเทล", value: "#c8ebfe" },
+      { label: "เขียวพาสเทล", value: "#d7fae5" },
+      { label: "ม่วงพาสเทล", value: "#efd6ff" },
+      { label: "เหลืองพาสเทล", value: "#fffcc4" },
+      { label: "ชมพูพาสเทล", value: "#ffc1e1" },
+    ],
+    bottom: [{ label: "ขาว", value: "#ffffff" }],
+    switch: COMMON_COLORS,
+  },
+};
+
+function getColorOptionsByType(typeId: string): TypeColorOptions {
+  return (
+    TYPE_COLOR_OPTIONS[typeId] ?? {
+      top: COMMON_COLORS,
+      bottom: COMMON_COLORS,
+      switch: COMMON_COLORS,
+    }
+  );
+}
+
+const A4_VIEWS: { key: RenderViewName; label: string }[] = [
+  { key: "front", label: "ด้านหน้า" },
+  { key: "angle", label: "มุมเอียง" },
+  { key: "left", label: "ด้านซ้าย" },
+  { key: "right", label: "ด้านขวา" },
+  { key: "back", label: "ด้านหลัง" },
+  { key: "top", label: "ด้านบน" },
 ];
 
 function normalizeHex(hex?: string) {
@@ -88,6 +232,21 @@ function normalizeHex(hex?: string) {
   const h = hex.trim();
   if (!h.startsWith("#")) return h;
   return h.length >= 7 ? h.slice(0, 7).toLowerCase() : h.toLowerCase();
+}
+
+function getColorLabel(color: string, options: { label: string; value: string }[]) {
+  const normalized = normalizeHex(color) ?? "";
+  const found = options.find((o) => (normalizeHex(o.value) ?? "") === normalized);
+  return found?.label ?? color;
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("โหลดภาพไม่สำเร็จ"));
+    img.src = src;
+  });
 }
 
 function ensureAllowedColor(color: string, options: { label: string; value: string }[]) {
@@ -133,32 +292,49 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [dragLogoMode, setDragLogoMode] = useState(false);
   const [dragPatternMode, setDragPatternMode] = useState(false);
 
-  const [logoTransform, setLogoTransform] = useState<LogoTransform>(DEFAULT_LOGO_TRANSFORM);
-  const [patternTransform, setPatternTransform] = useState<PatternTransform>(DEFAULT_PATTERN_TRANSFORM);
+  // ✅ State สำหรับจัดการ 3 โลโก้
+  const [logos, setLogos] = useState<LogoItem[]>(DEFAULT_LOGOS);
+  const [activeLogoId, setActiveLogoId] = useState<string>("logo-1");
+  const activeLogo = logos.find((l) => l.id === activeLogoId) || logos[0];
 
+  const [patternTransform, setPatternTransform] = useState<PatternTransform>(DEFAULT_PATTERN_TRANSFORM);
   const [patternRotation, setPatternRotation] = useState<number>(0);
 
   const [uploadedPatterns, setUploadedPatterns] = useState<string[]>([]);
+
+  const renderRef = useRef<PlugRenderFn | null>(null);
 
   const plugConfig = useMemo(
     () => getPlugConfig(selectedPlugId, { modelPath: plug.modelPath }),
     [selectedPlugId, plug.modelPath]
   );
 
+  const colorOptions = useMemo(
+    () => getColorOptionsByType(selectedPlugId),
+    [selectedPlugId]
+  );
+
   const safeColors = useMemo(() => {
     const out: Partial<Record<ColorKey, string>> = {
-      top: ensureAllowedColor(customization.topColor, ALLOWED_COLOR_OPTIONS),
-      bottom: ensureAllowedColor(customization.bottomColor, ALLOWED_COLOR_OPTIONS),
+      top: ensureAllowedColor(customization.topColor, colorOptions.top),
+      bottom: ensureAllowedColor(customization.bottomColor, colorOptions.bottom),
     };
 
-    if (selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3") {
-      out.switch = ensureAllowedColor(customization.switchColor, ALLOWED_COLOR_OPTIONS);
+    if (selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && selectedPlugId !== "TYPE-4") {
+      out.switch = ensureAllowedColor(customization.switchColor, colorOptions.switch);
     }
 
     return out;
-  }, [selectedPlugId, customization.topColor, customization.bottomColor, customization.switchColor]);
+  }, [
+    selectedPlugId,
+    customization.topColor,
+    customization.bottomColor,
+    customization.switchColor,
+    colorOptions,
+  ]);
 
-  const hasLogo = !!customization.logoUrl;
+  // ✅ เช็คว่ามีโลโก้อย่างน้อย 1 อันที่อัปโหลดไว้หรือไม่
+  const hasLogo = logos.some((l) => l.url !== "");
   const hasPattern = !!customization.patternUrl && customization.patternUrl.trim() !== "";
   const currentStepIdx = stepIndex(step);
 
@@ -166,9 +342,9 @@ export default function PlugCustomizer({ plugId }: Props) {
     setCustomization((s) => ({ ...s, ...patch }));
   }
 
+  // ✅ รีเซ็ตโลโก้ทั้งหมด
   function resetLogo() {
-    patchCustomization({ logoUrl: undefined });
-    setLogoTransform(DEFAULT_LOGO_TRANSFORM);
+    setLogos(DEFAULT_LOGOS);
     setDragLogoMode(false);
   }
 
@@ -182,21 +358,125 @@ export default function PlugCustomizer({ plugId }: Props) {
   function resetAll() {
     patchCustomization({
       patternUrl: "",
-      logoUrl: undefined,
-      topColor: ALLOWED_COLOR_OPTIONS[0].value,
-      bottomColor: "#eaeaea",
-      switchColor: ALLOWED_COLOR_OPTIONS[0].value,
+      topColor: colorOptions.top[0]?.value ?? "#ffffff",
+      bottomColor: colorOptions.bottom[0]?.value ?? "#eaeaea",
+      switchColor: colorOptions.switch[0]?.value ?? "#ffffff",
     });
-    setLogoTransform(DEFAULT_LOGO_TRANSFORM);
+    setLogos(DEFAULT_LOGOS);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
     setDragLogoMode(false);
     setDragPatternMode(false);
   }
 
-  function handleLogoSelect(url: string) {
-    patchCustomization({ logoUrl: url });
+  // ✅ จัดการเมื่อเลือกไฟล์โลโก้
+  function handleLogoSelect(id: string, url: string) {
+    setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, url } : l)));
+    setActiveLogoId(id);
     setStep("logo");
+  }
+
+  // ✅ จัดการเมื่อลบโลโก้
+  function handleLogoRemove(id: string) {
+    setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, url: "" } : l)));
+  }
+
+  // ✅ จัดการเปลี่ยนแปลง Scale, Rotation, X, Y ของโลโก้ตัวที่กำลังเลือก
+  function handleLogoTransformChange(id: string, newTransform: LogoTransform) {
+    setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, transform: newTransform } : l)));
+  }
+
+  async function downloadA4Sheet() {
+    const render = renderRef.current;
+    if (!render) return;
+
+    const captures = await Promise.all(
+      A4_VIEWS.map(async (item) => ({
+        label: item.label,
+        src: await render({
+          transparent: true,
+          view: item.key,
+          download: false,
+          filename: `plug-${selectedPlugId}-${item.key}.png`,
+        }),
+      }))
+    );
+
+    const validCaptures = captures.filter((item): item is { label: string; src: string } => typeof item.src === "string" && item.src.length > 0);
+    if (!validCaptures.length) return;
+
+    const images = await Promise.all(validCaptures.map((item) => loadImage(item.src)));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 2480;
+    canvas.height = 3508;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#111827";
+    ctx.font = "bold 76px sans-serif";
+    ctx.fillText("Plug Mockup A4 Preview", 140, 150);
+
+    ctx.fillStyle = "#4b5563";
+    ctx.font = "34px sans-serif";
+    ctx.fillText(`รุ่น: ${plug.name ?? selectedPlugId}`, 140, 220);
+
+    const colorLine =
+      selectedPlugId === "TYPE-4"
+        ? `สีตัวปลั๊ก: ${getColorLabel(safeColors.top ?? customization.topColor, colorOptions.top)}`
+        : `สีบน: ${getColorLabel(safeColors.top ?? customization.topColor, colorOptions.top)}   สีล่าง: ${getColorLabel(safeColors.bottom ?? customization.bottomColor, colorOptions.bottom)}`;
+
+    ctx.fillText(colorLine, 140, 270);
+    ctx.fillText(`ลาย: ${hasPattern ? "มีลาย" : "ไม่มีลาย"}   โลโก้: ${hasLogo ? "มีโลโก้" : "ไม่มีโลโก้"}`, 140, 320);
+
+    const pageW = canvas.width;
+    const marginX = 120;
+    const topY = 390;
+    const gapX = 60;
+    const gapY = 54;
+    const cols = 2;
+    const cardW = (pageW - marginX * 2 - gapX) / cols;
+    const cardH = 900;
+
+    validCaptures.forEach((item, idx) => {
+      const img = images[idx];
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const x = marginX + col * (cardW + gapX);
+      const y = topY + row * (cardH + gapY);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = "#d1d5db";
+      ctx.lineWidth = 3;
+      ctx.fillRect(x, y, cardW, cardH);
+      ctx.strokeRect(x, y, cardW, cardH);
+
+      ctx.fillStyle = "#111827";
+      ctx.font = "bold 36px sans-serif";
+      ctx.fillText(item.label, x + 28, y + 56);
+
+      const innerPadX = 34;
+      const innerTop = 92;
+      const innerW = cardW - innerPadX * 2;
+      const innerH = cardH - innerTop - 30;
+      const fit = Math.min(innerW / img.width, innerH / img.height);
+      const drawW = img.width * fit;
+      const drawH = img.height * fit;
+      const drawX = x + (cardW - drawW) / 2;
+      const drawY = y + innerTop + (innerH - drawH) / 2;
+
+      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+    });
+
+    const dataUrl = canvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = `plug-${selectedPlugId}-A4-preview.png`;
+    link.click();
   }
 
   function handlePatternUpload(base64: string) {
@@ -217,15 +497,16 @@ export default function PlugCustomizer({ plugId }: Props) {
   }
 
   function handleChangeModel(id: string) {
+    const nextOptions = getColorOptionsByType(id);
+
     setSelectedPlugId(id);
     patchCustomization({
       patternUrl: "",
-      logoUrl: undefined,
-      topColor: ensureAllowedColor(customization.topColor, ALLOWED_COLOR_OPTIONS),
-      bottomColor: ensureAllowedColor(customization.bottomColor, ALLOWED_COLOR_OPTIONS),
-      switchColor: ensureAllowedColor(customization.switchColor, ALLOWED_COLOR_OPTIONS),
+      topColor: ensureAllowedColor(customization.topColor, nextOptions.top),
+      bottomColor: ensureAllowedColor(customization.bottomColor, nextOptions.bottom),
+      switchColor: ensureAllowedColor(customization.switchColor, nextOptions.switch),
     });
-    setLogoTransform(DEFAULT_LOGO_TRANSFORM);
+    setLogos(DEFAULT_LOGOS);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
     setDragLogoMode(false);
@@ -274,29 +555,35 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="hint">ปรับสีส่วนประกอบหลักของชิ้นงาน</div>
 
           <div style={{ marginTop: 10 }}>
+            {/* ✅ ถ้าเป็น TYPE-4 ให้เปลี่ยนชื่อ Label เป็น "สีตัวปลั๊ก" */}
             <ColorPicker
-              label="ฝาบน"
+              label={selectedPlugId === "TYPE-4" ? "สีตัวปลั๊ก" : "ฝาบน"}
               initialColor={customization.topColor}
-              options={ALLOWED_COLOR_OPTIONS}
+              options={colorOptions.top}
               onColorChange={(c) => patchCustomization({ topColor: c })}
             />
 
-            <div style={{ height: 10 }} />
+            {/* ✅ ซ่อนฝาล่าง ถ้าเป็น TYPE-4 */}
+            {selectedPlugId !== "TYPE-4" && (
+              <>
+                <div style={{ height: 10 }} />
+                <ColorPicker
+                  label="ฝาล่าง"
+                  initialColor={customization.bottomColor}
+                  options={colorOptions.bottom}
+                  onColorChange={(c) => patchCustomization({ bottomColor: c })}
+                />
+              </>
+            )}
 
-            <ColorPicker
-              label="ฝาล่าง"
-              initialColor={customization.bottomColor}
-              options={ALLOWED_COLOR_OPTIONS}
-              onColorChange={(c) => patchCustomization({ bottomColor: c })}
-            />
-
-            {selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && (
+            {/* ✅ ซ่อนสวิตช์ ถ้าเป็น TYPE-1, 3, 4 */}
+            {selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && selectedPlugId !== "TYPE-4" && (
               <>
                 <div style={{ height: 10 }} />
                 <ColorPicker
                   label="สวิตช์"
                   initialColor={customization.switchColor}
-                  options={ALLOWED_COLOR_OPTIONS}
+                  options={colorOptions.switch}
                   onColorChange={(c) => patchCustomization({ switchColor: c })}
                 />
               </>
@@ -333,7 +620,6 @@ export default function PlugCustomizer({ plugId }: Props) {
             </span>
           </label>
 
-          {/* ⭐️ ปรับลด maxHeight ตรงนี้ให้เหลือ 220px เพื่อประหยัดพื้นที่ */}
           <div className="patternScroll" style={{ maxHeight: 220, marginTop: 10 }}>
             <PatternPicker
               patternsForSelected={patterns[selectedPlugId] || []}
@@ -496,70 +782,104 @@ export default function PlugCustomizer({ plugId }: Props) {
       );
     }
 
+    // ✅ UI ฝั่งโลโก้แบบ 3 อัน
     if (step === "logo") {
       return (
         <div>
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div>
-              <div className="label">โลโก้</div>
-              <div className="hint">อัปโหลดและจัดวางโลโก้</div>
+              <div className="label">โลโก้ (อัปโหลดได้สูงสุด 3 ตำแหน่ง)</div>
+              <div className="hint">คลิกที่กรอบเพื่อแก้ไขโลโก้นั้นๆ</div>
             </div>
-            <div className="row" style={{ gap: 8 }}>
-              <LogoUploader onSelect={handleLogoSelect} />
-              <button type="button" className="btn btnGhost" disabled={!hasLogo} onClick={resetLogo}>
-                รีเซ็ต
-              </button>
-            </div>
+            <button type="button" className="btn btnGhost" disabled={!hasLogo} onClick={resetLogo}>
+              ล้างโลโก้ทั้งหมด
+            </button>
+          </div>
+
+          <div className="divider" />
+
+          {/* กล่องอัปโหลด 3 ช่อง */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {logos.map((logo, index) => {
+              const isActive = activeLogoId === logo.id;
+              return (
+                <div
+                  key={logo.id}
+                  onClick={() => setActiveLogoId(logo.id)}
+                  style={{
+                    border: isActive ? "2px solid #3b82f6" : "2px solid transparent",
+                    padding: "10px",
+                    borderRadius: "8px",
+                    background: isActive ? "rgba(59,130,246,0.05)" : "transparent",
+                    transition: "all 0.2s",
+                    cursor: "pointer"
+                  }}
+                >
+                  <LogoUploader
+                    id={logo.id}
+                    label={`โลโก้ ${index + 1}`}
+                    currentUrl={logo.url}
+                    onSelect={handleLogoSelect}
+                    onRemove={handleLogoRemove}
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <div className="divider" />
 
           <label className="row" style={{ gap: 8 }}>
-            <input type="checkbox" checked={dragLogoMode} disabled={!hasLogo} onChange={(e) => setDragLogoMode(e.target.checked)} />
-            <span className="label" style={{ opacity: hasLogo ? 1 : 0.55 }}>
-              โหมดลากโลโก้
+            <input
+              type="checkbox"
+              checked={dragLogoMode}
+              disabled={!activeLogo.url}
+              onChange={(e) => setDragLogoMode(e.target.checked)}
+            />
+            <span className="label" style={{ opacity: activeLogo.url ? 1 : 0.55 }}>
+              โหมดลากโลโก้ (สำหรับ {`โลโก้ ${logos.findIndex((l) => l.id === activeLogoId) + 1}`})
             </span>
           </label>
 
-          <div style={{ marginTop: 10, opacity: hasLogo ? 1 : 0.5 }}>
+          <div style={{ marginTop: 10, opacity: activeLogo.url ? 1 : 0.5 }}>
             <Slider
-              label={`ขนาด: ${logoTransform.scale.toFixed(2)}`}
+              label={`ขนาด: ${activeLogo.transform.scale.toFixed(2)}`}
               min={0.05}
               max={0.6}
               step={0.01}
-              value={logoTransform.scale}
-              disabled={!hasLogo}
-              onChange={(v) => setLogoTransform((s) => ({ ...s, scale: v }))}
+              value={activeLogo.transform.scale}
+              disabled={!activeLogo.url}
+              onChange={(v) => handleLogoTransformChange(activeLogo.id, { ...activeLogo.transform, scale: v })}
             />
             <div style={{ height: 10 }} />
             <Slider
-              label={`X: ${logoTransform.x.toFixed(2)}`}
+              label={`X: ${activeLogo.transform.x.toFixed(2)}`}
               min={-0.45}
               max={0.45}
               step={0.01}
-              value={logoTransform.x}
-              disabled={!hasLogo}
-              onChange={(v) => setLogoTransform((s) => ({ ...s, x: v }))}
+              value={activeLogo.transform.x}
+              disabled={!activeLogo.url}
+              onChange={(v) => handleLogoTransformChange(activeLogo.id, { ...activeLogo.transform, x: v })}
             />
             <div style={{ height: 10 }} />
             <Slider
-              label={`Y: ${logoTransform.y.toFixed(2)}`}
+              label={`Y: ${activeLogo.transform.y.toFixed(2)}`}
               min={-0.45}
               max={0.45}
               step={0.01}
-              value={logoTransform.y}
-              disabled={!hasLogo}
-              onChange={(v) => setLogoTransform((s) => ({ ...s, y: v }))}
+              value={activeLogo.transform.y}
+              disabled={!activeLogo.url}
+              onChange={(v) => handleLogoTransformChange(activeLogo.id, { ...activeLogo.transform, y: v })}
             />
             <div style={{ height: 10 }} />
             <Slider
-              label={`หมุน: ${(logoTransform.rot * (180 / Math.PI)).toFixed(0)}°`}
+              label={`หมุน: ${(activeLogo.transform.rot * (180 / Math.PI)).toFixed(0)}°`}
               min={-Math.PI}
               max={Math.PI}
               step={0.01}
-              value={logoTransform.rot}
-              disabled={!hasLogo}
-              onChange={(v) => setLogoTransform((s) => ({ ...s, rot: v }))}
+              value={activeLogo.transform.rot}
+              disabled={!activeLogo.url}
+              onChange={(v) => handleLogoTransformChange(activeLogo.id, { ...activeLogo.transform, rot: v })}
             />
           </div>
         </div>
@@ -571,8 +891,20 @@ export default function PlugCustomizer({ plugId }: Props) {
         <div className="label">มุมมอง</div>
         <div className="hint">เลือกมุมมองสำหรับโชว์/ดาวน์โหลด</div>
         <div style={{ marginTop: 10 }}>
-          <LayoutPreview view={customization.view} onSetView={(v) => patchCustomization({ view: v })} onDownload={() => { }} />
-        </div>
+          <LayoutPreview
+            view={customization.view}
+            onSetView={(v) => patchCustomization({ view: v })}
+            onDownload={() => {
+              void renderRef.current?.({
+                transparent: true,
+                filename: `plug-${selectedPlugId}-${customization.view}.png`,
+                view: customization.view,
+              });
+            }}
+            onDownloadA4={() => {
+              void downloadA4Sheet();
+            }}
+          />        </div>
 
         <div className="divider" />
 
@@ -611,16 +943,20 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <Plug3D
                   key={plugConfig.modelPath}
                   config={plugConfig}
-                  logoUrl={customization.logoUrl}
+                  logos={logos}
+                  activeLogoId={activeLogoId}
+                  onLogoTransformChange={handleLogoTransformChange}
                   patternUrl={customization.patternUrl}
                   patternTransform={patternTransform}
                   onPatternTransformChange={setPatternTransform}
                   patternRotation={patternRotation}
                   colors={safeColors}
-                  logoTransform={logoTransform}
-                  onLogoTransformChange={setLogoTransform}
-                  dragLogoMode={dragLogoMode && hasLogo}
+                  dragLogoMode={dragLogoMode && activeLogo.url !== ""}
                   dragPatternMode={dragPatternMode && hasPattern}
+                  view={customization.view}
+                  onRenderReady={(render) => {
+                    renderRef.current = render;
+                  }}
                 />
               </div>
 
@@ -647,9 +983,12 @@ export default function PlugCustomizer({ plugId }: Props) {
             <div className="body">
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <div className="row">
-                  <LogoUploader onSelect={handleLogoSelect} />
+                  {/* ทางลัดโลโก้ จะเปลี่ยนเป็นปุ่มไปที่หน้าแก้ไขโลโก้แทนเพื่อลดความสับสน */}
+                  <button type="button" className="btn btnGhost" onClick={() => setStep("logo")}>
+                    ⚙️ ปรับแต่งโลโก้ (3 จุด)
+                  </button>
                   <button type="button" className="btn btnGhost" onClick={resetLogo} disabled={!hasLogo}>
-                    รีเซ็ตโลโก้
+                    ล้างโลโก้ทั้งหมด
                   </button>
                 </div>
                 <button type="button" className="btn btnGhost" onClick={resetPattern} disabled={!hasPattern}>
@@ -669,10 +1008,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               </div>
             </div>
 
-            {/* ⭐️ ส่วนที่ปรับปรุง: เรียงซ้ายขวา (Stepper ซ้าย, Content ขวา) */}
             <div className="body config-layout">
-
-              {/* ซ้าย: เมนูขั้นตอน 1-5 */}
               <div className="stepper">
                 {STEPS.map((s, idx) => {
                   const active = s.id === step;
@@ -691,16 +1027,13 @@ export default function PlugCustomizer({ plugId }: Props) {
                 })}
               </div>
 
-              {/* เส้นคั่นกลาง */}
               <div className="config-divider" />
 
-              {/* ขวา: พื้นที่แสดงตัวเลือกของแต่ละขั้นตอน */}
               <div className="config-content">
                 <div style={{ flex: 1, overflowY: "auto", paddingRight: 6 }}>
                   {renderStepContent()}
                 </div>
 
-                {/* ปุ่ม ย้อนกลับ / ถัดไป ให้อยู่ติดขอบล่างเสมอ */}
                 <div style={{ marginTop: 16 }}>
                   <div className="divider" style={{ margin: "0 0 12px 0" }} />
                   <div className="row" style={{ justifyContent: "space-between" }}>
@@ -794,13 +1127,12 @@ const CSS = `
       linear-gradient(180deg, #f7f9ff, #eef2ff 60%, #f8fafc);
   }
 
-  /* ⭐️ ขยายหน้าจอให้กว้างขึ้น และให้พื้นที่ฝั่งขวาเยอะขึ้น */
   .pc-grid{
     max-width: 1440px; 
     margin: 0 auto;
     display: grid;
     gap: 16px;
-    grid-template-columns: 1fr 1.4fr; /* Mockup ซ้าย 1 ส่วน : เครื่องมือขวา 1.4 ส่วน */
+    grid-template-columns: 1fr 1.4fr;
     align-items: start;
   }
 
@@ -808,15 +1140,13 @@ const CSS = `
   @media (max-height: 820px){ :root{ --mockH: 440px; } }
   @media (max-height: 740px){ :root{ --mockH: 400px; } }
 
-  /* ⭐️ เลย์เอาต์ใหม่ของการ์ดตั้งค่า (ซ้าย:เมนูขีด, กลาง:เส้น, ขวา:เนื้อหา) */
   .config-layout {
     display: grid;
     grid-template-columns: 180px 1px 1fr;
     gap: 16px;
-    min-height: var(--mockH); /* ให้สูงอย่างน้อยเท่ากับฝั่ง 3D Mockup */
+    min-height: var(--mockH);
   }
 
-  /* เส้นคั่นแนวตั้ง */
   .config-divider {
     width: 1px;
     background: rgba(226,232,240,.9);
@@ -832,7 +1162,6 @@ const CSS = `
     .pc-grid{ grid-template-columns: 1fr; }
     .sticky{ position: static !important; }
     
-    /* ถ้าย่อจอเล็กลงให้กลับไปเรียงบน-ล่างเหมือนเดิม */
     .config-layout { 
       grid-template-columns: 1fr; 
       min-height: auto; 
@@ -1001,22 +1330,18 @@ const CSS = `
     color: #0f172a;
   }
 
-  /* ⭐️ ปรับพื้นที่แสดงลวดลาย */
   .patternScroll {
     overflow-y: auto;
     overflow-x: hidden;
     padding-right: 6px;
   }
 
-  /* ⭐️ จัดเรียงกล่องรูปลายให้เป็น Grid แบบปรับจำนวนอัตโนมัติ (Auto-fill) ไม่ล็อก 3 คอลัมน์ */
   .pattern-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); 
     gap: 10px;
     align-items: start;
   }
-
-  /* ลบคำสั่ง .patternScroll button ออก เพื่อไม่ให้ไปบีบปุ่ม "อัปโหลด" และ "ล้างลาย" ให้พัง */
 
   .miniPad{
     display:grid;
@@ -1060,5 +1385,4 @@ const CSS = `
   input[type="range"]{
     accent-color: #2563eb;
   }
-
 `;

@@ -45,15 +45,20 @@ const patterns: Record<string, PatternItem[]> = {
 
   "TYPE-3": [
     {
-      id: "t2-test1",
-      name: "TYPE-2 Test 1",
+      id: "t3-test1",
+      name: "TYPE-3 Test 1",
       preview: "/patterns/TYPE-1/test2.png",
       img: "/patterns/TYPE-1/test2.png",
     },
   ],
 
   "TYPE-4": [
-    // ใส่ลายของ TYPE-4
+       {
+      id: "t4-test1",
+      name: "TYPE-4 Test 1",
+      preview: "/patterns/TYPE-1/test2.png",
+      img: "/patterns/TYPE-1/test2.png",
+    },
   ],
 };
 
