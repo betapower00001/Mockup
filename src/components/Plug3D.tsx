@@ -2,7 +2,7 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Environment, OrbitControls, useGLTF, useTexture } from "@react-three/drei";
 import { suspend } from "suspend-react";
 import * as THREE from "three";
@@ -132,6 +132,116 @@ function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCam
   position.y += lift;
 
   return { position, target };
+}
+
+function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName): CameraPose {
+  const box = new THREE.Box3().setFromObject(object);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+
+  const safeX = Math.max(size.x, 0.0001);
+  const safeY = Math.max(size.y, 0.0001);
+  const safeZ = Math.max(size.z, 0.0001);
+  const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+  const fitHeight = (safeY * 0.72) / Math.max(Math.tan(halfFov), 0.01);
+  const fitWidth = (safeX * 0.72) / Math.max(Math.tan(halfFov) * Math.max(camera.aspect, 0.5), 0.01);
+  const fitDepth = safeZ * 1.2;
+  const dist = Math.max(fitHeight, fitWidth, fitDepth, 1.6);
+  const lift = Math.max(safeY * 0.08, 0.08);
+
+  const target = center.clone();
+  let dir = new THREE.Vector3(0, 0.08, 1);
+  let mul = 1.0;
+
+  switch (view) {
+    case "front":
+      dir = new THREE.Vector3(0, 0.08, 1);
+      mul = 1.0;
+      break;
+    case "angle":
+      dir = new THREE.Vector3(1.1, 0.58, 1.28);
+      mul = 1.0;
+      break;
+    case "left":
+      dir = new THREE.Vector3(-1, 0.18, 0.08);
+      mul = 1.02;
+      break;
+    case "right":
+      dir = new THREE.Vector3(1, 0.18, 0.08);
+      mul = 1.02;
+      break;
+    case "back":
+      dir = new THREE.Vector3(0, 0.1, -1);
+      mul = 1.0;
+      break;
+    case "top":
+      dir = new THREE.Vector3(0, 1.7, 0.04);
+      mul = 1.02;
+      break;
+  }
+
+  const position = center.clone().add(dir.normalize().multiplyScalar(dist * mul));
+  position.y += lift;
+  return { position, target };
+}
+
+function renderSceneToDataURL(args: {
+  gl: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  width: number;
+  height: number;
+  transparent: boolean;
+}) {
+  const { gl, scene, camera, width, height, transparent } = args;
+
+  const oldTarget = gl.getRenderTarget();
+  const oldAutoClear = gl.autoClear;
+  const oldClearColor = new THREE.Color();
+  gl.getClearColor(oldClearColor);
+  const oldClearAlpha = gl.getClearAlpha();
+
+  const target = new THREE.WebGLRenderTarget(width, height, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    depthBuffer: true,
+    stencilBuffer: false,
+  });
+  target.texture.colorSpace = THREE.SRGBColorSpace;
+
+  const pixels = new Uint8Array(width * height * 4);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    target.dispose();
+    return null;
+  }
+
+  try {
+    gl.autoClear = true;
+    gl.setRenderTarget(target);
+    gl.setClearColor(0xffffff, transparent ? 0 : 1);
+    gl.clear(true, true, true);
+    gl.render(scene, camera);
+    gl.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+
+    const imageData = ctx.createImageData(width, height);
+    for (let y = 0; y < height; y++) {
+      const srcY = height - 1 - y;
+      const srcOffset = srcY * width * 4;
+      const dstOffset = y * width * 4;
+      imageData.data.set(pixels.subarray(srcOffset, srcOffset + width * 4), dstOffset);
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.toDataURL("image/png");
+  } finally {
+    gl.setRenderTarget(oldTarget);
+    gl.autoClear = oldAutoClear;
+    gl.setClearColor(oldClearColor, oldClearAlpha);
+    target.dispose();
+  }
 }
 
 function applyCameraPose(camera: THREE.PerspectiveCamera, pose: CameraPose) {
@@ -1058,6 +1168,7 @@ function PlugScene({
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
 }) {
   const { scene } = useGLTF(config.modelPath) as any;
+  const rootScene = useThree((state: any) => state.scene) as THREE.Scene;
 
   const [logoMesh, setLogoMesh] = useState<THREE.Mesh | null>(null);
   const [patternMesh, setPatternMesh] = useState<THREE.Mesh | null>(null);
@@ -1415,54 +1526,49 @@ function PlugScene({
 
     onRenderReady(async (opts?: PlugRenderOptions) => {
       const gl = glRef.current;
-      const camera = cameraRef.current;
-      if (!gl || !camera) return null;
+      const liveCamera = cameraRef.current;
+      if (!gl || !liveCamera) return null;
 
       const transparent = opts?.transparent ?? false;
       const filename = opts?.filename ?? "render.png";
       const shouldDownload = opts?.download ?? true;
 
-      const oldClearColor = new THREE.Color();
-      gl.getClearColor(oldClearColor);
-      const oldClearAlpha = gl.getClearAlpha();
+      const exportWidth = shouldDownload ? 2200 : 1800;
+      const exportHeight = shouldDownload ? 2200 : 1800;
 
-      const oldPos = camera.position.clone();
-      const oldQuat = camera.quaternion.clone();
-      const oldUp = camera.up.clone();
-      const oldZoom = camera.zoom;
+      const exportCamera = liveCamera.clone() as THREE.PerspectiveCamera;
+      exportCamera.aspect = exportWidth / exportHeight;
+      exportCamera.near = liveCamera.near;
+      exportCamera.far = liveCamera.far;
+      exportCamera.zoom = liveCamera.zoom;
+      exportCamera.up.copy(liveCamera.up);
 
-      try {
-        if (opts?.view) {
-          const pose = getSceneCameraPose(scene, camera, opts.view);
-          applyCameraPose(camera, pose);
-          await waitNextFrame();
-        }
+      const pose = getExportCameraPose(scene, exportCamera, opts?.view ?? "angle");
+      applyCameraPose(exportCamera, pose);
+      exportCamera.updateMatrixWorld(true);
+      await waitNextFrame();
 
-        gl.setClearColor(0xffffff, transparent ? 0 : 1);
-        gl.render(scene as any, camera);
+      const dataURL = renderSceneToDataURL({
+        gl,
+        scene: rootScene,
+        camera: exportCamera,
+        width: exportWidth,
+        height: exportHeight,
+        transparent,
+      });
 
-        const dataURL = gl.domElement.toDataURL("image/png");
+      if (!dataURL) return null;
 
-        if (shouldDownload) {
-          const a = document.createElement("a");
-          a.href = dataURL;
-          a.download = filename;
-          a.click();
-        }
-
-        return dataURL;
-      } finally {
-        camera.position.copy(oldPos);
-        camera.quaternion.copy(oldQuat);
-        camera.up.copy(oldUp);
-        camera.zoom = oldZoom;
-        camera.updateProjectionMatrix();
-
-        gl.setClearColor(oldClearColor, oldClearAlpha);
-        gl.render(scene as any, camera);
+      if (shouldDownload) {
+        const a = document.createElement("a");
+        a.href = dataURL;
+        a.download = filename;
+        a.click();
       }
+
+      return dataURL;
     });
-  }, [onRenderReady, glRef, cameraRef, scene]);
+  }, [onRenderReady, glRef, cameraRef, scene, rootScene]);
 
   const draggingRef = useRef(false);
   const draggingPatternRef = useRef(false);
@@ -1657,10 +1763,12 @@ export default function Plug3D({
         cameraRef.current = camera as THREE.PerspectiveCamera;
       }}
     >
-      <ambientLight intensity={0.18} />
+      <ambientLight intensity={0.36} />
+      <hemisphereLight intensity={0.28} groundColor="#ffffff" />
       <directionalLight position={[4, 6, 4]} intensity={0.32} />
       <directionalLight position={[-4, 2, 1]} intensity={0.14} />
       <directionalLight position={[0, 3, -4]} intensity={0.18} />
+      <directionalLight position={[0, -3, 2]} intensity={0.12} />
 
       <Suspense fallback={null}>
         <PlugScene

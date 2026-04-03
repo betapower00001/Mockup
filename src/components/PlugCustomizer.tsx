@@ -85,137 +85,48 @@ const DEFAULT_PATTERN_TRANSFORM: PatternTransform = {
 };
 
 type ColorOption = { label: string; value: string };
-type TypeColorOptions = {
-  top: ColorOption[];
-  bottom: ColorOption[];
-  switch: ColorOption[];
-};
 
 const COMMON_COLORS: ColorOption[] = [
   { label: "ขาว", value: "#ffffff" },
   { label: "ดำ", value: "#111111" },
-  { label: "ส้ม", value: "#ec3b27" },
-  { label: "แดง", value: "#ed1b24" },
-  { label: "กรมท่า", value: "#181d47" },
-  { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-  { label: "เขียวพาสเทล", value: "#62c2a6" },
-  { label: "เหลือง", value: "#ffc813" },
-  { label: "ชมพู", value: "#f37c8f" },
-
+  { label: "เทาอ่อน", value: "#d9d9d9" },
+  { label: "เทาเข้ม", value: "#7a7a7a" },
+  { label: "ครีม", value: "#f3ead8" },
+  { label: "เบจ", value: "#d6c2a1" },
+  { label: "น้ำเงิน", value: "#1d4ed8" },
+  { label: "กรม", value: "#1e293b" },
 ];
 
-const TYPE_COLOR_OPTIONS: Record<string, TypeColorOptions> = {
-  "TYPE-1": {
-    top: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ed1b24" },
-      { label: "กรมท่า", value: "#181d47" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-    ],
-    bottom: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ed1b24" },
-      { label: "กรมท่า", value: "#181d47" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-    ],
-    switch: COMMON_COLORS,
-  },
-
-  "TYPE-2": {
-    top: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ed1b24" },
-      { label: "กรมท่า", value: "#181d47" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-    ],
-    bottom: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ed1b24" },
-      { label: "กรมท่า", value: "#181d47" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-    ],
-    switch: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ed1b24" },
-      { label: "กรมท่า", value: "#181d47" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-    ],
-  },
-
-  "TYPE-3": {
-    top: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ed1b24" },
-      { label: "กรมท่า", value: "#181d47" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-    ],
-    bottom: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ed1b24" },
-      { label: "กรมท่า", value: "#181d47" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-    ],
-    switch: COMMON_COLORS,
-  },
-
-  "TYPE-4": {
-    top: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ฟ้าพาสเทล", value: "#c8ebfe" },
-      { label: "เขียวพาสเทล", value: "#d7fae5" },
-      { label: "ม่วงพาสเทล", value: "#efd6ff" },
-      { label: "เหลืองพาสเทล", value: "#fffcc4" },
-      { label: "ชมพูพาสเทล", value: "#ffc1e1" },
-    ],
-    bottom: [{ label: "ขาว", value: "#ffffff" }],
-    switch: COMMON_COLORS,
-  },
+const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOption[]> = {
+  "TYPE-1": [
+    { label: "ขาว", value: "#ffffff" },
+    { label: "ดำ", value: "#111111" },
+    { label: "เทาอ่อน", value: "#d9d9d9" },
+    { label: "กรม", value: "#1e293b" },
+  ],
+  "TYPE-2": [
+    { label: "ขาว", value: "#ffffff" },
+    { label: "ดำ", value: "#111111" },
+    { label: "ครีม", value: "#f3ead8" },
+    { label: "เบจ", value: "#d6c2a1" },
+    { label: "น้ำเงิน", value: "#1d4ed8" },
+  ],
+  "TYPE-3": [
+    { label: "ขาว", value: "#ffffff" },
+    { label: "ดำ", value: "#111111" },
+    { label: "เทาเข้ม", value: "#7a7a7a" },
+    { label: "กรม", value: "#1e293b" },
+  ],
+  "TYPE-4": [
+    { label: "ขาว", value: "#ffffff" },
+    { label: "ดำ", value: "#111111" },
+    { label: "ครีม", value: "#f3ead8" },
+    { label: "เบจ", value: "#d6c2a1" },
+  ],
 };
 
-function getColorOptionsByType(typeId: string): TypeColorOptions {
-  return (
-    TYPE_COLOR_OPTIONS[typeId] ?? {
-      top: COMMON_COLORS,
-      bottom: COMMON_COLORS,
-      switch: COMMON_COLORS,
-    }
-  );
+function getColorOptionsByType(typeId: string): ColorOption[] {
+  return COLOR_OPTIONS_BY_TYPE[typeId] ?? COMMON_COLORS;
 }
 
 const A4_VIEWS: { key: RenderViewName; label: string }[] = [
@@ -247,6 +158,56 @@ function loadImage(src: string) {
     img.onerror = () => reject(new Error("โหลดภาพไม่สำเร็จ"));
     img.src = src;
   });
+}
+
+function cropTransparentBounds(img: HTMLImageElement, alphaThreshold = 8) {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return { canvas, x: 0, y: 0, width: canvas.width, height: canvas.height };
+  }
+
+  ctx.drawImage(img, 0, 0);
+  const { width, height } = canvas;
+  const data = ctx.getImageData(0, 0, width, height).data;
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] > alphaThreshold) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) {
+    return { canvas, x: 0, y: 0, width, height };
+  }
+
+  const pad = 20;
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(width - 1, maxX + pad);
+  maxY = Math.min(height - 1, maxY + pad);
+
+  return {
+    canvas,
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
 }
 
 function ensureAllowedColor(color: string, options: { label: string; value: string }[]) {
@@ -309,19 +270,19 @@ export default function PlugCustomizer({ plugId }: Props) {
     [selectedPlugId, plug.modelPath]
   );
 
-  const colorOptions = useMemo(
+  const currentColorOptions = useMemo(
     () => getColorOptionsByType(selectedPlugId),
     [selectedPlugId]
   );
 
   const safeColors = useMemo(() => {
     const out: Partial<Record<ColorKey, string>> = {
-      top: ensureAllowedColor(customization.topColor, colorOptions.top),
-      bottom: ensureAllowedColor(customization.bottomColor, colorOptions.bottom),
+      top: ensureAllowedColor(customization.topColor, currentColorOptions),
+      bottom: ensureAllowedColor(customization.bottomColor, currentColorOptions),
     };
 
     if (selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && selectedPlugId !== "TYPE-4") {
-      out.switch = ensureAllowedColor(customization.switchColor, colorOptions.switch);
+      out.switch = ensureAllowedColor(customization.switchColor, currentColorOptions);
     }
 
     return out;
@@ -330,7 +291,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     customization.topColor,
     customization.bottomColor,
     customization.switchColor,
-    colorOptions,
+    currentColorOptions,
   ]);
 
   // ✅ เช็คว่ามีโลโก้อย่างน้อย 1 อันที่อัปโหลดไว้หรือไม่
@@ -358,9 +319,9 @@ export default function PlugCustomizer({ plugId }: Props) {
   function resetAll() {
     patchCustomization({
       patternUrl: "",
-      topColor: colorOptions.top[0]?.value ?? "#ffffff",
-      bottomColor: colorOptions.bottom[0]?.value ?? "#eaeaea",
-      switchColor: colorOptions.switch[0]?.value ?? "#ffffff",
+      topColor: currentColorOptions[0]?.value ?? "#ffffff",
+      bottomColor: "#eaeaea",
+      switchColor: currentColorOptions[0]?.value ?? "#ffffff",
     });
     setLogos(DEFAULT_LOGOS);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
@@ -406,6 +367,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     if (!validCaptures.length) return;
 
     const images = await Promise.all(validCaptures.map((item) => loadImage(item.src)));
+    const croppedImages = images.map((img) => cropTransparentBounds(img));
 
     const canvas = document.createElement("canvas");
     canvas.width = 2480;
@@ -424,13 +386,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     ctx.fillStyle = "#4b5563";
     ctx.font = "34px sans-serif";
     ctx.fillText(`รุ่น: ${plug.name ?? selectedPlugId}`, 140, 220);
-
-    const colorLine =
-      selectedPlugId === "TYPE-4"
-        ? `สีตัวปลั๊ก: ${getColorLabel(safeColors.top ?? customization.topColor, colorOptions.top)}`
-        : `สีบน: ${getColorLabel(safeColors.top ?? customization.topColor, colorOptions.top)}   สีล่าง: ${getColorLabel(safeColors.bottom ?? customization.bottomColor, colorOptions.bottom)}`;
-
-    ctx.fillText(colorLine, 140, 270);
+    ctx.fillText(`สีบน: ${getColorLabel(safeColors.top ?? customization.topColor, currentColorOptions)}   สีล่าง: ${getColorLabel(safeColors.bottom ?? customization.bottomColor, currentColorOptions)}`, 140, 270);
     ctx.fillText(`ลาย: ${hasPattern ? "มีลาย" : "ไม่มีลาย"}   โลโก้: ${hasLogo ? "มีโลโก้" : "ไม่มีโลโก้"}`, 140, 320);
 
     const pageW = canvas.width;
@@ -441,9 +397,11 @@ export default function PlugCustomizer({ plugId }: Props) {
     const cols = 2;
     const cardW = (pageW - marginX * 2 - gapX) / cols;
     const cardH = 900;
+    const globalMaxW = Math.max(...croppedImages.map((c) => c.width), 1);
+    const globalMaxH = Math.max(...croppedImages.map((c) => c.height), 1);
 
     validCaptures.forEach((item, idx) => {
-      const img = images[idx];
+      const cropped = croppedImages[idx];
       const col = idx % cols;
       const row = Math.floor(idx / cols);
       const x = marginX + col * (cardW + gapX);
@@ -459,17 +417,28 @@ export default function PlugCustomizer({ plugId }: Props) {
       ctx.font = "bold 36px sans-serif";
       ctx.fillText(item.label, x + 28, y + 56);
 
-      const innerPadX = 34;
-      const innerTop = 92;
+      const innerPadX = 18;
+      const innerTop = 82;
       const innerW = cardW - innerPadX * 2;
-      const innerH = cardH - innerTop - 30;
-      const fit = Math.min(innerW / img.width, innerH / img.height);
-      const drawW = img.width * fit;
-      const drawH = img.height * fit;
+      const innerH = cardH - innerTop - 18;
+
+      const sharedScale = Math.min((innerW * 0.88) / globalMaxW, (innerH * 0.88) / globalMaxH);
+      const drawW = cropped.width * sharedScale;
+      const drawH = cropped.height * sharedScale;
       const drawX = x + (cardW - drawW) / 2;
       const drawY = y + innerTop + (innerH - drawH) / 2;
 
-      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+      ctx.drawImage(
+        cropped.canvas,
+        cropped.x,
+        cropped.y,
+        cropped.width,
+        cropped.height,
+        drawX,
+        drawY,
+        drawW,
+        drawH
+      );
     });
 
     const dataUrl = canvas.toDataURL("image/png");
@@ -502,9 +471,9 @@ export default function PlugCustomizer({ plugId }: Props) {
     setSelectedPlugId(id);
     patchCustomization({
       patternUrl: "",
-      topColor: ensureAllowedColor(customization.topColor, nextOptions.top),
-      bottomColor: ensureAllowedColor(customization.bottomColor, nextOptions.bottom),
-      switchColor: ensureAllowedColor(customization.switchColor, nextOptions.switch),
+      topColor: ensureAllowedColor(customization.topColor, nextOptions),
+      bottomColor: ensureAllowedColor(customization.bottomColor, nextOptions),
+      switchColor: ensureAllowedColor(customization.switchColor, nextOptions),
     });
     setLogos(DEFAULT_LOGOS);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
@@ -559,7 +528,7 @@ export default function PlugCustomizer({ plugId }: Props) {
             <ColorPicker
               label={selectedPlugId === "TYPE-4" ? "สีตัวปลั๊ก" : "ฝาบน"}
               initialColor={customization.topColor}
-              options={colorOptions.top}
+              options={currentColorOptions}
               onColorChange={(c) => patchCustomization({ topColor: c })}
             />
 
@@ -570,7 +539,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <ColorPicker
                   label="ฝาล่าง"
                   initialColor={customization.bottomColor}
-                  options={colorOptions.bottom}
+                  options={currentColorOptions}
                   onColorChange={(c) => patchCustomization({ bottomColor: c })}
                 />
               </>
@@ -583,7 +552,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <ColorPicker
                   label="สวิตช์"
                   initialColor={customization.switchColor}
-                  options={colorOptions.switch}
+                  options={currentColorOptions}
                   onColorChange={(c) => patchCustomization({ switchColor: c })}
                 />
               </>
