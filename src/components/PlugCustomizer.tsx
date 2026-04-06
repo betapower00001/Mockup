@@ -86,6 +86,12 @@ const DEFAULT_PATTERN_TRANSFORM: PatternTransform = {
 
 type ColorOption = { label: string; value: string };
 
+type ColorOptionsByPart = {
+  top: ColorOption[];
+  bottom: ColorOption[];
+  switch?: ColorOption[];
+};
+
 const COMMON_COLORS: ColorOption[] = [
   { label: "ขาว", value: "#ffffff" },
   { label: "ดำ", value: "#111111" },
@@ -97,36 +103,102 @@ const COMMON_COLORS: ColorOption[] = [
   { label: "กรม", value: "#1e293b" },
 ];
 
-const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOption[]> = {
-  "TYPE-1": [
-    { label: "ขาว", value: "#ffffff" },
-    { label: "ดำ", value: "#111111" },
-    { label: "เทาอ่อน", value: "#d9d9d9" },
-    { label: "กรม", value: "#1e293b" },
-  ],
-  "TYPE-2": [
-    { label: "ขาว", value: "#ffffff" },
-    { label: "ดำ", value: "#111111" },
-    { label: "ครีม", value: "#f3ead8" },
-    { label: "เบจ", value: "#d6c2a1" },
-    { label: "น้ำเงิน", value: "#1d4ed8" },
-  ],
-  "TYPE-3": [
-    { label: "ขาว", value: "#ffffff" },
-    { label: "ดำ", value: "#111111" },
-    { label: "เทาเข้ม", value: "#7a7a7a" },
-    { label: "กรม", value: "#1e293b" },
-  ],
-  "TYPE-4": [
-    { label: "ขาว", value: "#ffffff" },
-    { label: "ดำ", value: "#111111" },
-    { label: "ครีม", value: "#f3ead8" },
-    { label: "เบจ", value: "#d6c2a1" },
-  ],
+const TYPE4_COLORS: ColorOption[] = [
+  { label: "ขาว", value: "#ffffff" },
+  { label: "ฟ้าพาสเทล", value: "#c9ebfe" },
+  { label: "ชมพูพลาสเทล", value: "#ffc2e1" },
+  { label: "เหลืองพาสเทล", value: "#fffdc5" },
+  { label: "ม่วงพลาสเทล", value: "#dca9ff" },
+  { label: "เขียวพาสเทล", value: "#d7fbe5" },
+];
+
+const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
+  "TYPE-1": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "เทาอ่อน", value: "#d9d9d9" },
+      { label: "กรม", value: "#1e293b" },
+      { label: "เบจ", value: "#d6c2a1" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
+    ],
+  },
+
+  "TYPE-2": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ครีม", value: "#f3ead8" },
+      { label: "เบจ", value: "#d6c2a1" },
+      { label: "น้ำเงิน", value: "#1d4ed8" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
+    ],
+    switch: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+    ],
+  },
+
+  "TYPE-3": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "เทาเข้ม", value: "#7a7a7a" },
+      { label: "กรม", value: "#1e293b" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
+    ],
+  },
+
+  "TYPE-4": {
+    top: TYPE4_COLORS,
+    bottom: TYPE4_COLORS,
+  },
 };
 
-function getColorOptionsByType(typeId: string): ColorOption[] {
-  return COLOR_OPTIONS_BY_TYPE[typeId] ?? COMMON_COLORS;
+function getColorOptionsByType(typeId: string): ColorOptionsByPart {
+  return (
+    COLOR_OPTIONS_BY_TYPE[typeId] ?? {
+      top: COMMON_COLORS,
+      bottom: COMMON_COLORS,
+      switch: COMMON_COLORS,
+    }
+  );
 }
 
 const A4_VIEWS: { key: RenderViewName; label: string }[] = [
@@ -276,13 +348,22 @@ export default function PlugCustomizer({ plugId }: Props) {
   );
 
   const safeColors = useMemo(() => {
+    const top = ensureAllowedColor(customization.topColor, currentColorOptions.top);
+    const bottom =
+      selectedPlugId === "TYPE-4"
+        ? top
+        : ensureAllowedColor(customization.bottomColor, currentColorOptions.bottom);
+
     const out: Partial<Record<ColorKey, string>> = {
-      top: ensureAllowedColor(customization.topColor, currentColorOptions),
-      bottom: ensureAllowedColor(customization.bottomColor, currentColorOptions),
+      top,
+      bottom,
     };
 
     if (selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && selectedPlugId !== "TYPE-4") {
-      out.switch = ensureAllowedColor(customization.switchColor, currentColorOptions);
+      out.switch = ensureAllowedColor(
+        customization.switchColor,
+        currentColorOptions.switch ?? currentColorOptions.top
+      );
     }
 
     return out;
@@ -300,7 +381,17 @@ export default function PlugCustomizer({ plugId }: Props) {
   const currentStepIdx = stepIndex(step);
 
   function patchCustomization(patch: Partial<CustomizationState>) {
-    setCustomization((s) => ({ ...s, ...patch }));
+    setCustomization((s) => {
+      const next = { ...s, ...patch };
+
+      if (selectedPlugId === "TYPE-4") {
+        const singleColor = patch.topColor ?? next.topColor ?? s.topColor;
+        next.topColor = singleColor;
+        next.bottomColor = singleColor;
+      }
+
+      return next;
+    });
   }
 
   // ✅ รีเซ็ตโลโก้ทั้งหมด
@@ -317,12 +408,15 @@ export default function PlugCustomizer({ plugId }: Props) {
   }
 
   function resetAll() {
+    const baseColor = currentColorOptions.top[0]?.value ?? "#ffffff";
+
     patchCustomization({
       patternUrl: "",
-      topColor: currentColorOptions[0]?.value ?? "#ffffff",
-      bottomColor: "#eaeaea",
-      switchColor: currentColorOptions[0]?.value ?? "#ffffff",
+      topColor: baseColor,
+      bottomColor: selectedPlugId === "TYPE-4" ? baseColor : "#eaeaea",
+      switchColor: (currentColorOptions.switch ?? currentColorOptions.top)[0]?.value ?? "#ffffff",
     });
+
     setLogos(DEFAULT_LOGOS);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
@@ -386,7 +480,22 @@ export default function PlugCustomizer({ plugId }: Props) {
     ctx.fillStyle = "#4b5563";
     ctx.font = "34px sans-serif";
     ctx.fillText(`รุ่น: ${plug.name ?? selectedPlugId}`, 140, 220);
-    ctx.fillText(`สีบน: ${getColorLabel(safeColors.top ?? customization.topColor, currentColorOptions)}   สีล่าง: ${getColorLabel(safeColors.bottom ?? customization.bottomColor, currentColorOptions)}`, 140, 270);
+    ctx.fillText(
+      selectedPlugId === "TYPE-4"
+        ? `สีตัวปลั๊ก: ${getColorLabel(
+          safeColors.top ?? customization.topColor,
+          currentColorOptions.top
+        )}`
+        : `สีบน: ${getColorLabel(
+          safeColors.top ?? customization.topColor,
+          currentColorOptions.top
+        )}   สีล่าง: ${getColorLabel(
+          safeColors.bottom ?? customization.bottomColor,
+          currentColorOptions.bottom
+        )}`,
+      140,
+      270
+    );
     ctx.fillText(`ลาย: ${hasPattern ? "มีลาย" : "ไม่มีลาย"}   โลโก้: ${hasLogo ? "มีโลโก้" : "ไม่มีโลโก้"}`, 140, 320);
 
     const pageW = canvas.width;
@@ -469,12 +578,25 @@ export default function PlugCustomizer({ plugId }: Props) {
     const nextOptions = getColorOptionsByType(id);
 
     setSelectedPlugId(id);
-    patchCustomization({
-      patternUrl: "",
-      topColor: ensureAllowedColor(customization.topColor, nextOptions),
-      bottomColor: ensureAllowedColor(customization.bottomColor, nextOptions),
-      switchColor: ensureAllowedColor(customization.switchColor, nextOptions),
+
+    setCustomization((s) => {
+      const nextTop = ensureAllowedColor(s.topColor, nextOptions.top);
+
+      return {
+        ...s,
+        patternUrl: "",
+        topColor: nextTop,
+        bottomColor:
+          id === "TYPE-4"
+            ? nextTop
+            : ensureAllowedColor(s.bottomColor, nextOptions.bottom),
+        switchColor: ensureAllowedColor(
+          s.switchColor,
+          nextOptions.switch ?? nextOptions.top
+        ),
+      };
     });
+
     setLogos(DEFAULT_LOGOS);
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
@@ -528,7 +650,7 @@ export default function PlugCustomizer({ plugId }: Props) {
             <ColorPicker
               label={selectedPlugId === "TYPE-4" ? "สีตัวปลั๊ก" : "ฝาบน"}
               initialColor={customization.topColor}
-              options={currentColorOptions}
+              options={currentColorOptions.top}
               onColorChange={(c) => patchCustomization({ topColor: c })}
             />
 
@@ -539,7 +661,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <ColorPicker
                   label="ฝาล่าง"
                   initialColor={customization.bottomColor}
-                  options={currentColorOptions}
+                  options={currentColorOptions.bottom}
                   onColorChange={(c) => patchCustomization({ bottomColor: c })}
                 />
               </>
@@ -552,7 +674,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <ColorPicker
                   label="สวิตช์"
                   initialColor={customization.switchColor}
-                  options={currentColorOptions}
+                  options={currentColorOptions.switch ?? currentColorOptions.top}
                   onColorChange={(c) => patchCustomization({ switchColor: c })}
                 />
               </>
