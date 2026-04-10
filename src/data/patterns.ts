@@ -53,9 +53,18 @@ const patterns: Record<string, PatternItem[]> = {
   ],
 
   "TYPE-4": [
-       {
+    {
       id: "t4-test1",
       name: "TYPE-4 Test 1",
+      preview: "/patterns/TYPE-1/test2.png",
+      img: "/patterns/TYPE-1/test2.png",
+    },
+  ],
+
+  "TYPE-5": [
+    {
+      id: "t5-test1",
+      name: "TYPE-5 Test 1",
       preview: "/patterns/TYPE-1/test2.png",
       img: "/patterns/TYPE-1/test2.png",
     },

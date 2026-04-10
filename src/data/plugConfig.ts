@@ -320,6 +320,92 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       seed: 1.0,
     },
   },
+
+
+  // ==========================================================
+  // ✅ TYPE-5 
+  // ==========================================================
+  "TYPE-5": {
+    id: "TYPE-5",
+    modelPath: "/models/plug/Un5.glb",
+
+    colorTargets: {
+      top: [
+        "Top_Front",
+        "Top_Side",
+        "TOP COVER 5 SOCKET USB.STEP",
+        "mat__top_Front",
+        "mat_top_Side",
+      ],
+      bottom: [
+        "Bottom",
+        "mat_bottom",
+      ],
+      switch: [
+        "Swit",
+        "mat_swit",
+        "shutter V0.5-1.STEP",
+        "shutter V0.5-2.STEP",
+        "shutter V0.5-3.STEP",
+        "shutter V0.5-4.STEP",
+        "shutter V0.5-5.STEP",
+      ],
+    },
+
+    patternWorldBBoxMeshes: ["Top_Front"],
+    patternWorldRefMesh: "Top_Front",
+
+    decal: {
+      meshName: "Top_Front",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 0],
+      scale: [0.08, 0.08, 0.08],
+      uvProjection: "XZ",
+      uvSpace: "local",
+      flipU: false,
+      flipV: false,
+      forceUV: true,
+      lockAxes: true,
+    },
+
+    patternDecal: {
+      meshName: "Top_Front",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 1.5708],
+      scale: 0.35,
+      uvProjection: "XZ",
+      uvSpace: "world",
+      forceUV: true,
+      lockAxes: true,
+      flipU: false,
+      flipV: true,
+      patternRotation: 0,
+      enablePattern: true,
+      worldAlign: true,
+      fitMode: "cover",
+    },
+    
+    patternSideDecal: {
+      meshName: "Top_Side",
+      position: [0, 0, 0.002],
+      rotation: [0, 0, 0],
+      scale: 0.35,
+      uvProjection: "XZ",
+      flipU: true,
+      flipV: false,
+      uvSpace: "world",
+      forceUV: true,
+      lockAxes: true,
+      enablePattern: false,
+      worldAlign: true,
+    },
+
+    patternTriplanar: {
+      scale: 2.5,
+      blend: 6.0,
+      seed: 1.0,
+    },
+  },
 };
 
 export function getPlugConfig(id: string, override?: { modelPath?: string }): PlugModelConfig {

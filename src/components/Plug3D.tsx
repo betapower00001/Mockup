@@ -705,7 +705,8 @@ function applyFitWithPanOnSurface(
   mode: "contain" | "cover" | "fixed" = "contain",
   minRepeat: number = 0,
   rotationRad: number = 0,
-  stableRotate: boolean = false
+  stableRotate: boolean = false,
+  clampEdges: boolean = false
 ) {
   const EPS = 1e-6;
 
@@ -762,7 +763,8 @@ function applyFitWithPanOnSurface(
     .translate(0.5 - px, 0.5 - py)
     .translate(0.5, 0.5);
 
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.wrapS = tex.wrapT =
+    clampEdges ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
   tex.needsUpdate = true;
 }
 
@@ -809,6 +811,7 @@ function applyPatternToMesh(args: {
   minRepeat?: number;
   lockAxes?: boolean;
   stableRotate?: boolean;
+  clampEdges?: boolean;
 }) {
   const { targetMesh, patternTex, isPatternEnabled, axes, pan, worldBBox, alignMatrix } = args;
 
@@ -862,7 +865,19 @@ function applyPatternToMesh(args: {
       }
 
       const { du, dv } = getDuDvFromWorldBox(bb, activeAxes);
-      applyFitWithPanOnSurface(tex, baseW, baseH, du, dv, p, fitMode, minRepeat, rot, !!args.stableRotate);
+      applyFitWithPanOnSurface(
+        tex,
+        baseW,
+        baseH,
+        du,
+        dv,
+        p,
+        fitMode,
+        minRepeat,
+        rot,
+        !!args.stableRotate,
+        !!args.clampEdges
+      );
     } else {
       const geo = targetMesh.geometry as THREE.BufferGeometry;
       geo.computeBoundingBox();
@@ -901,7 +916,8 @@ function applyPatternToMesh(args: {
           fitMode,
           minRepeat,
           rot,
-          !!args.stableRotate
+          !!args.stableRotate,
+          !!args.clampEdges
         );
       }
     }
@@ -990,7 +1006,7 @@ function applyPatternToMesh(args: {
 }
 
 // ======================================================
-// ✅ 3. Logo Layer Component (TYPE-4 ถูกแยกแล้ว!)
+// ✅ 3. Logo Layer Component (แก้ปัญหากระพริบ Type 5)
 // ======================================================
 function LogoLayer({
   logoMesh,
@@ -1003,85 +1019,43 @@ function LogoLayer({
   logo: LogoItem;
   index: number;
 }) {
-  // ✅ แก้เฉพาะ TYPE-4 โดยไม่กระทบ TYPE อื่น
-  const isType3 = config.id === "TYPE-3";
+  const isType3 = config.id === "TYPE-3" || config.id === "TYPE-5";
   const isType4 = config.id === "TYPE-4";
   const isFixedLogoType = isType3 || isType4;
 
-  const stickerTex = useStickerTexture(
-    logo.url,
-    logo.transform
-      ? {
-        x: isFixedLogoType ? 0 : logo.transform.x,
-        y: isFixedLogoType ? 0 : logo.transform.y,
-        scale: isFixedLogoType
-          ? 1
-          : Array.isArray(logo.transform.scale)
-            ? logo.transform.scale[0]
-            : (logo.transform.scale as any),
-        rot: isFixedLogoType ? 0 : logo.transform.rot,
-      }
-      : undefined
-  );
+  // 1️⃣ ป้องกัน useStickerTexture โหลดภาพใหม่ทุกครั้งที่ลากเมาส์
+  // เราจะล็อค Object ไม่ให้เปลี่ยน Reference ถ้าระบบเป็น Fixed Type (Type 3, 4, 5)
+  const transformArgs = useMemo(() => {
+    if (!logo.transform) return undefined;
+    if (isFixedLogoType) {
+      return { x: 0, y: 0, scale: 1, rot: 0 };
+    }
+    return {
+      x: logo.transform.x,
+      y: logo.transform.y,
+      scale: Array.isArray(logo.transform.scale)
+        ? logo.transform.scale[0]
+        : logo.transform.scale,
+      rot: logo.transform.rot,
+    };
+  }, [
+    isFixedLogoType,
+    // ทริค: ซ่อน dependency ตอนที่ลากเมาส์ เพื่อไม่ให้ useMemo รีรัน Object ใหม่
+    isFixedLogoType ? 0 : logo.transform?.x,
+    isFixedLogoType ? 0 : logo.transform?.y,
+    isFixedLogoType ? 1 : logo.transform?.scale,
+    isFixedLogoType ? 0 : logo.transform?.rot,
+  ]);
 
+  const stickerTex = useStickerTexture(logo.url, transformArgs);
+
+  // 2️⃣ Effect สำหรับ "สร้าง" Mesh (ทำแค่ตอนโลโก้แอดเข้ามาครั้งแรก)
   useEffect(() => {
     if (!logoMesh || !logo.url || !stickerTex) return;
 
     const overlayName = `__LOGO_OVERLAY_${logo.id}__`;
     const old = logoMesh.getObjectByName(overlayName);
     if (old) old.parent?.remove(old);
-
-    if (isFixedLogoType) {
-      let du = 1, dv = 1;
-      logoMesh.geometry.computeBoundingBox();
-      const s = new THREE.Vector3();
-      logoMesh.geometry.boundingBox?.getSize(s);
-
-      const proj: UVProjection = isType4 ? "XZ" : (config.decal.uvProjection || "XZ");
-      if (proj === "XY") {
-        du = s.x; dv = s.y;
-      } else if (proj === "XZ") {
-        du = s.x; dv = s.z;
-      } else {
-        du = s.y; dv = s.z;
-      }
-
-      du = Math.max(0.001, du);
-      dv = Math.max(0.001, dv);
-
-      const maxDim = Math.max(du, dv);
-      const normX = du / maxDim;
-      const normY = dv / maxDim;
-
-      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
-      const rotUI = logo.transform?.rot ?? 0;
-      const totalRot = rotConfig + rotUI;
-
-      const px = logo.transform?.x ?? 0;
-      const py = logo.transform?.y ?? 0;
-
-      let uiScale = 1;
-      if (logo.transform?.scale !== undefined) {
-        uiScale = Array.isArray(logo.transform.scale) ? logo.transform.scale[0] : logo.transform.scale;
-      }
-
-      stickerTex.matrixAutoUpdate = false;
-      stickerTex.matrix
-        .identity()
-        .translate(-0.5 - px, -0.5 - py)
-        .scale(normX, normY)
-        .rotate(totalRot)
-        .scale(1 / uiScale, 1 / uiScale)
-        .translate(0.5, 0.5);
-    } else {
-      // ✅ TYPE อื่นๆ ใช้ค่าแบบมาตรฐานเหมือนเดิม
-      const rotConfig = config.decal.rotation ? config.decal.rotation[2] : 0;
-      stickerTex.matrixAutoUpdate = false;
-      stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(rotConfig).translate(0.5, 0.5);
-    }
-
-    stickerTex.flipY = false;
-    stickerTex.needsUpdate = true;
 
     const overlayMat = new THREE.MeshBasicMaterial({
       map: stickerTex,
@@ -1120,7 +1094,64 @@ function LogoLayer({
       overlay.parent?.remove(overlay);
       overlayMat.dispose();
     };
-  }, [logoMesh, stickerTex, logo, config, index, isType3, isType4, isFixedLogoType]);
+  }, [logoMesh, stickerTex, logo.id, logo.url, index]);
+
+  // 3️⃣ Effect สำหรับ "อัปเดตตำแหน่ง" Matrix ตอนลาก
+  const decalProj = config.decal.uvProjection;
+  const decalRot = config.decal.rotation ? config.decal.rotation[2] : 0;
+
+  useEffect(() => {
+    if (!logoMesh || !stickerTex) return;
+
+    if (isFixedLogoType) {
+      let du = 1, dv = 1;
+      logoMesh.geometry.computeBoundingBox();
+      const s = new THREE.Vector3();
+      logoMesh.geometry.boundingBox?.getSize(s);
+
+      const proj: UVProjection = isType4 ? "XZ" : (decalProj || "XZ");
+      if (proj === "XY") {
+        du = s.x; dv = s.y;
+      } else if (proj === "XZ") {
+        du = s.x; dv = s.z;
+      } else {
+        du = s.y; dv = s.z;
+      }
+
+      du = Math.max(0.001, du);
+      dv = Math.max(0.001, dv);
+
+      const maxDim = Math.max(du, dv);
+      const normX = du / maxDim;
+      const normY = dv / maxDim;
+
+      const rotUI = logo.transform?.rot ?? 0;
+      const totalRot = decalRot + rotUI;
+
+      const px = logo.transform?.x ?? 0;
+      const py = logo.transform?.y ?? 0;
+
+      let uiScale = 1;
+      if (logo.transform?.scale !== undefined) {
+        uiScale = Array.isArray(logo.transform.scale) ? logo.transform.scale[0] : logo.transform.scale;
+      }
+
+      stickerTex.matrixAutoUpdate = false;
+      stickerTex.matrix
+        .identity()
+        .translate(-0.5 - px, -0.5 - py)
+        .scale(normX, normY)
+        .rotate(totalRot)
+        .scale(1 / uiScale, 1 / uiScale)
+        .translate(0.5, 0.5);
+    } else {
+      stickerTex.matrixAutoUpdate = false;
+      stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(decalRot).translate(0.5, 0.5);
+    }
+
+    // ⛔ เอา stickerTex.needsUpdate = true ออกจากตรงนี้
+    // การปรับแค่ Matrix ไม่จำเป็นต้องส่ง Texture รูปภาพอัปโหลดไปที่ GPU ใหม่ครับ
+  }, [logo.transform, stickerTex, logoMesh, isFixedLogoType, isType4, decalProj, decalRot]);
 
   return null;
 }
@@ -1173,6 +1204,7 @@ function PlugScene({
   const [logoMesh, setLogoMesh] = useState<THREE.Mesh | null>(null);
   const [patternMesh, setPatternMesh] = useState<THREE.Mesh | null>(null);
   const [patternSideMesh, setPatternSideMesh] = useState<THREE.Mesh | null>(null);
+  const prevViewRef = useRef<string | null>(null);
 
   const wantsWorld = config.patternDecal?.uvSpace === "world" || config.patternSideDecal?.uvSpace === "world";
 
@@ -1200,7 +1232,7 @@ function PlugScene({
 
     if (m) {
       // ✅ 🌟 แยกการจัดการ TYPE-4 ออกมาโดยเฉพาะ
-      if (config.id === "TYPE-3") {
+      if (config.id === "TYPE-3" || config.id === "TYPE-5") {
         ensurePlanarUVByNormal(m, config.decal.flipU, config.decal.flipV, true);
       } else if (config.id === "TYPE-4") {
         // TYPE-4 บังคับใช้แกน XZ ใน Plug3D เท่านั้น โดยไม่แตะ TYPE อื่น
@@ -1362,8 +1394,10 @@ function PlugScene({
       (config.patternDecal as any)?.patternRotation ??
       0;
 
-    const fitMode = patternFitMode ?? "contain";
-    const minRepeat = 0;
+    const fitMode =
+      config.id === "TYPE-5"
+        ? ((config.patternDecal as any)?.fitMode ?? "cover")
+        : (patternFitMode ?? "contain"); const minRepeat = 0;
 
     if (wantsWorldMain && patternWorldBBox && isFixedType && fixedWorldAxes) {
       axes = fixedWorldAxes;
@@ -1431,7 +1465,10 @@ function PlugScene({
       (config.patternDecal as any)?.patternRotation ??
       0;
 
-    const fitMode = patternFitMode ?? "contain";
+    const fitMode =
+      config.id === "TYPE-5"
+        ? ((sideCfg as any)?.fitMode ?? (config.patternDecal as any)?.fitMode ?? "cover")
+        : (patternFitMode ?? "contain");
 
     if (wantsWorldSide && patternWorldBBox && isFixedType && fixedWorldAxes) {
       axes = fixedWorldAxes;
@@ -1512,11 +1549,19 @@ function PlugScene({
     };
   }, [patternSideMesh, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
+  // ✅ 2. เอาโค้ดนี้ไปวางทับตัวจัดการกล้องอันเดิม
   useEffect(() => {
     const camera = cameraRef.current;
     if (!camera) return;
 
-    const pose = getSceneCameraPose(scene, camera, view ?? "angle");
+    // ตรวจสอบว่าถ้ามุมมอง (view) ยังเป็นค่าเดิม ไม่ต้องจัดกล้องใหม่
+    const currentView = view ?? "angle";
+    if (prevViewRef.current === currentView) return;
+
+    // อัปเดตค่ามุมมองล่าสุด
+    prevViewRef.current = currentView;
+
+    const pose = getSceneCameraPose(scene, camera, currentView);
     applyCameraPose(camera, pose);
   }, [scene, cameraRef, view]);
 
@@ -1586,7 +1631,10 @@ function PlugScene({
 
     if (e.uv) {
       // ✅ TYPE-4 ใช้แกนทิศเดียวกับ TYPE-3 เฉพาะการลากโลโก้
-      const isFixedLogoType = config.id === "TYPE-3" || config.id === "TYPE-4";
+      const isFixedLogoType =
+        config.id === "TYPE-3" ||
+        config.id === "TYPE-4" ||
+        config.id === "TYPE-5";
       onLogoTransformChange(activeLogo.id, {
         ...activeLogo.transform,
         x: e.uv.x - 0.5,
@@ -1602,8 +1650,11 @@ function PlugScene({
     e.stopPropagation();
 
     if (e.uv) {
-      // ✅ TYPE-4 ใช้แกนทิศเดียวกับ TYPE-3 เฉพาะการลากโลโก้
-      const isFixedLogoType = config.id === "TYPE-3" || config.id === "TYPE-4";
+      const isFixedLogoType =
+        config.id === "TYPE-3" ||
+        config.id === "TYPE-4" ||
+        config.id === "TYPE-5";
+
       onLogoTransformChange(activeLogo.id, {
         ...activeLogo.transform,
         x: e.uv.x - 0.5,
@@ -1747,6 +1798,7 @@ export default function Plug3D({
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<any>(null);
+  const prevViewRef = useRef<string | null>(null);
 
   const cameraPos = useMemo(() => [0, 0.1, 3] as [number, number, number], []);
   const lockControls = dragLogoMode || dragPatternMode || renderMode;
@@ -1790,6 +1842,8 @@ export default function Plug3D({
           onRenderReady={onRenderReady}
           glRef={glRef}
           cameraRef={cameraRef}
+          
+
         />
 
         <EnvErrorBoundary>
