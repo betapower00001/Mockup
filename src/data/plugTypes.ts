@@ -35,7 +35,7 @@ export const plugTypes: PlugType[] = [
     {
     id: "TYPE-5",
     name: "Hector",
-    thumb: "/plugs/TYPE-5/thumb.png",
+    thumb: "/plugs/TYPE-5/T-5.png",
     modelPath: "/models/plug/Un5.glb",
   },
 ];
