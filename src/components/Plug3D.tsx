@@ -3,12 +3,13 @@
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Environment, OrbitControls, useGLTF, useTexture } from "@react-three/drei";
+import { Environment, OrbitControls, useGLTF, useTexture, Center } from "@react-three/drei";
 import { suspend } from "suspend-react";
 import * as THREE from "three";
 import type { PlugModelConfig, ColorKey, UVProjection, UVSpace } from "../data/plugConfig";
 import type { LogoTransform } from "./PlugCustomizer";
-import FitToObject from "./FitToObject";
+// ✅ เอา FitToObject ออกจากการ Import ก็ได้ครับ (หรือปล่อยไว้ถ้าใช้ที่อื่น)
+// import FitToObject from "./FitToObject"; 
 import { useStickerTexture } from "./useStickerTexture";
 
 const cityEnv = import("@pmndrs/assets/hdri/city.exr").then((m) => m.default);
@@ -30,7 +31,6 @@ export type PatternTransform = {
   zoom: number; // 1.. (>=1 recommended)
 };
 
-// ✅ 1. เพิ่ม Type สำหรับรายการโลโก้
 export type LogoItem = {
   id: string;
   url: string;
@@ -39,26 +39,19 @@ export type LogoItem = {
 
 type Plug3DProps = {
   config: PlugModelConfig;
-
-  // ✅ 2. เปลี่ยนจาก logoUrl, logoTransform อันเดียว เป็น logos Array
   logos?: LogoItem[];
   activeLogoId?: string | null;
   onLogoTransformChange?: (id: string, t: LogoTransform) => void;
-
   patternUrl?: string;
   colors: Partial<Record<ColorKey, string>>;
-
   patternTransform?: PatternTransform;
   onPatternTransformChange?: (t: PatternTransform) => void;
-
   patternRotation?: number;
   patternBrightness?: number; // default 0.75
   patternOpacity?: number; // default 1
   patternFitMode?: "contain" | "cover";
-
   dragLogoMode?: boolean;
   dragPatternMode?: boolean;
-
   renderMode?: boolean;
   view?: "front" | "angle";
   onRenderReady?: (render: PlugRenderFn) => void;
@@ -93,17 +86,28 @@ type CameraPose = {
   target: THREE.Vector3;
 };
 
-function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName): CameraPose {
+function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName, configId?: string): CameraPose {
   const box = new THREE.Box3().setFromObject(object);
-  const center = box.getCenter(new THREE.Vector3());
+  const center = new THREE.Vector3(0, 0, 0);
   const size = box.getSize(new THREE.Vector3());
 
-  const safeMax = Math.max(size.x, size.y, size.z, 1);
+  const safeMax = Math.max(size.x, size.y, size.z, 0.001);
   const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
   const fitDist = (safeMax * 0.75) / Math.max(Math.tan(halfFov), 0.01);
-  const dist = Math.max(fitDist * 1.35, 2.2);
-  const lift = Math.max(size.y * 0.1, safeMax * 0.03);
 
+  // ✅ 2. ตั้งค่าระยะห่างแยกตามรุ่น (เลขยิ่งมาก กล้องยิ่งถอยออกไปไกล)
+  let zoomMultiplier = 1.0; // ระยะเริ่มต้น
+
+  if (configId === "TYPE-1") {
+    zoomMultiplier = 1.8; // 👈 ปรับตรงนี้ให้ TYPE-1 ถอยไกลขึ้น (ลองเปลี่ยนเป็น 1.5, 2.0 ได้ตามชอบ)
+  } else if (configId === "TYPE-2") {
+    zoomMultiplier = 1.0; // TYPE อื่นๆ ก็ใส่เพิ่มดักไว้ได้ครับ
+  }
+
+  // ✅ 3. เอาตัวคูณไปคูณกับ fitDist
+  const dist = Math.max(fitDist * zoomMultiplier, 0.1);
+
+  const lift = Math.max(size.y * 0.1, safeMax * 0.03);
   const target = center.clone();
   let dir = new THREE.Vector3(0, 0.1, 1);
 
@@ -136,7 +140,7 @@ function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCam
 
 function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName): CameraPose {
   const box = new THREE.Box3().setFromObject(object);
-  const center = box.getCenter(new THREE.Vector3());
+  const center = new THREE.Vector3(0, 0, 0);
   const size = box.getSize(new THREE.Vector3());
 
   const safeX = Math.max(size.x, 0.0001);
@@ -146,7 +150,7 @@ function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCa
   const fitHeight = (safeY * 0.72) / Math.max(Math.tan(halfFov), 0.01);
   const fitWidth = (safeX * 0.72) / Math.max(Math.tan(halfFov) * Math.max(camera.aspect, 0.5), 0.01);
   const fitDepth = safeZ * 1.2;
-  const dist = Math.max(fitHeight, fitWidth, fitDepth, 1.6);
+  const dist = Math.max(fitHeight, fitWidth, fitDepth, 0.1);
   const lift = Math.max(safeY * 0.08, 0.08);
 
   const target = center.clone();
@@ -1006,7 +1010,7 @@ function applyPatternToMesh(args: {
 }
 
 // ======================================================
-// ✅ 3. Logo Layer Component (แก้ปัญหากระพริบ Type 5)
+// ✅ 3. Logo Layer Component 
 // ======================================================
 function LogoLayer({
   logoMesh,
@@ -1023,8 +1027,6 @@ function LogoLayer({
   const isType4 = config.id === "TYPE-4";
   const isFixedLogoType = isType3 || isType4;
 
-  // 1️⃣ ป้องกัน useStickerTexture โหลดภาพใหม่ทุกครั้งที่ลากเมาส์
-  // เราจะล็อค Object ไม่ให้เปลี่ยน Reference ถ้าระบบเป็น Fixed Type (Type 3, 4, 5)
   const transformArgs = useMemo(() => {
     if (!logo.transform) return undefined;
     if (isFixedLogoType) {
@@ -1040,7 +1042,6 @@ function LogoLayer({
     };
   }, [
     isFixedLogoType,
-    // ทริค: ซ่อน dependency ตอนที่ลากเมาส์ เพื่อไม่ให้ useMemo รีรัน Object ใหม่
     isFixedLogoType ? 0 : logo.transform?.x,
     isFixedLogoType ? 0 : logo.transform?.y,
     isFixedLogoType ? 1 : logo.transform?.scale,
@@ -1049,7 +1050,6 @@ function LogoLayer({
 
   const stickerTex = useStickerTexture(logo.url, transformArgs);
 
-  // 2️⃣ Effect สำหรับ "สร้าง" Mesh (ทำแค่ตอนโลโก้แอดเข้ามาครั้งแรก)
   useEffect(() => {
     if (!logoMesh || !logo.url || !stickerTex) return;
 
@@ -1096,7 +1096,6 @@ function LogoLayer({
     };
   }, [logoMesh, stickerTex, logo.id, logo.url, index]);
 
-  // 3️⃣ Effect สำหรับ "อัปเดตตำแหน่ง" Matrix ตอนลาก
   const decalProj = config.decal.uvProjection;
   const decalRot = config.decal.rotation ? config.decal.rotation[2] : 0;
 
@@ -1149,8 +1148,6 @@ function LogoLayer({
       stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(decalRot).translate(0.5, 0.5);
     }
 
-    // ⛔ เอา stickerTex.needsUpdate = true ออกจากตรงนี้
-    // การปรับแค่ Matrix ไม่จำเป็นต้องส่ง Texture รูปภาพอัปโหลดไปที่ GPU ใหม่ครับ
   }, [logo.transform, stickerTex, logoMesh, isFixedLogoType, isType4, decalProj, decalRot]);
 
   return null;
@@ -1178,6 +1175,8 @@ function PlugScene({
   onRenderReady,
   glRef,
   cameraRef,
+  // ✅ รับค่า prevViewRef จากตัวแม่
+  prevViewRef,
 }: {
   config: PlugModelConfig;
   logos?: LogoItem[];
@@ -1197,14 +1196,18 @@ function PlugScene({
   onRenderReady?: Plug3DProps["onRenderReady"];
   glRef: React.MutableRefObject<THREE.WebGLRenderer | null>;
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
+  // ✅ ประกาศ Type ของ prevViewRef
+  prevViewRef: React.MutableRefObject<string | null>;
 }) {
   const { scene } = useGLTF(config.modelPath) as any;
   const rootScene = useThree((state: any) => state.scene) as THREE.Scene;
 
+  // ✅ ดึงระบบควบคุมกล้องมาใช้งาน
+  const controls = useThree((state: any) => state.controls);
+
   const [logoMesh, setLogoMesh] = useState<THREE.Mesh | null>(null);
   const [patternMesh, setPatternMesh] = useState<THREE.Mesh | null>(null);
   const [patternSideMesh, setPatternSideMesh] = useState<THREE.Mesh | null>(null);
-  const prevViewRef = useRef<string | null>(null);
 
   const wantsWorld = config.patternDecal?.uvSpace === "world" || config.patternSideDecal?.uvSpace === "world";
 
@@ -1231,11 +1234,9 @@ function PlugScene({
     const m = findMeshByName(scene, config.decal.meshName);
 
     if (m) {
-      // ✅ 🌟 แยกการจัดการ TYPE-4 ออกมาโดยเฉพาะ
       if (config.id === "TYPE-3" || config.id === "TYPE-5") {
         ensurePlanarUVByNormal(m, config.decal.flipU, config.decal.flipV, true);
       } else if (config.id === "TYPE-4") {
-        // TYPE-4 บังคับใช้แกน XZ ใน Plug3D เท่านั้น โดยไม่แตะ TYPE อื่น
         ensurePlanarUV(
           m,
           "XZ",
@@ -1549,21 +1550,32 @@ function PlugScene({
     };
   }, [patternSideMesh, config.patternSideDecal?.enablePattern, isPatternEnabled, patternTex]);
 
-  // ✅ 2. เอาโค้ดนี้ไปวางทับตัวจัดการกล้องอันเดิม
+  const prevConfigIdRef = useRef<string | null>(null);
+  // ✅ กล้องที่ทำงานประสานกับตัวแม่ (ไม่เด้งตอนโหลดลาย)
   useEffect(() => {
     const camera = cameraRef.current;
     if (!camera) return;
 
-    // ตรวจสอบว่าถ้ามุมมอง (view) ยังเป็นค่าเดิม ไม่ต้องจัดกล้องใหม่
     const currentView = view ?? "angle";
-    if (prevViewRef.current === currentView) return;
+    const isModelChanged = prevConfigIdRef.current !== config.id; // เช็คว่าเปลี่ยนรุ่นปลั๊กหรือไม่
 
-    // อัปเดตค่ามุมมองล่าสุด
+    // ถ้ามุมมองเดิม "และ" ไม่ได้เปลี่ยนรุ่นปลั๊ก (แปลว่าแค่อัปโหลดรูปลวดลาย) -> ไม่ต้องจัดกล้องใหม่
+    if (!isModelChanged && prevViewRef.current === currentView) return;
+
+    // อัปเดตค่าความจำล่าสุด
     prevViewRef.current = currentView;
+    prevConfigIdRef.current = config.id;
 
+    // ✅ ใช้ 0,0,0 เสมอ เพราะเรามี <Center> ช่วยดึงโมเดลมาตรงกลางแล้ว
     const pose = getSceneCameraPose(scene, camera, currentView);
     applyCameraPose(camera, pose);
-  }, [scene, cameraRef, view]);
+
+    // อัปเดตเป้าหมายการหมุน
+    if (controls) {
+      controls.target.copy(pose.target);
+      controls.update();
+    }
+  }, [scene, cameraRef, view, prevViewRef, controls, config.id]);
 
   // render
   useEffect(() => {
@@ -1619,7 +1631,6 @@ function PlugScene({
   const draggingPatternRef = useRef(false);
   const patternDragStartRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
 
-  // ✅ 4. จัดการ Drag & Drop ของโลโก้
   const activeLogo = logos?.find((l) => l.id === activeLogoId);
 
   const onPointerDown = (e: any) => {
@@ -1630,7 +1641,6 @@ function PlugScene({
     draggingRef.current = true;
 
     if (e.uv) {
-      // ✅ TYPE-4 ใช้แกนทิศเดียวกับ TYPE-3 เฉพาะการลากโลโก้
       const isFixedLogoType =
         config.id === "TYPE-3" ||
         config.id === "TYPE-4" ||
@@ -1667,9 +1677,6 @@ function PlugScene({
     draggingRef.current = false;
   };
 
-  // =======================
-  // PATTERN DRAG
-  // =======================
   const activePatternMesh = patternMesh ?? logoMesh;
   const DRAG_SENSITIVITY = 2.5;
 
@@ -1756,22 +1763,27 @@ function PlugScene({
           onPatternPointerUp();
         }}
       >
-        <primitive object={scene} />
+        {/* ✅ 1. เพิ่มบรรทัดนี้ครอบไว้ */}
+        <Center>
+          <primitive object={scene} />
 
-        {logoMesh && logos?.map((logo, index) => (
-          // ⛔ เช็คดักไว้เลย! ถ้ามี url ค่อย Render ถ้าไม่มีให้เป็น null ไปเลย
-          logo.url ? (
-            <LogoLayer
-              key={logo.id}
-              logoMesh={logoMesh}
-              config={config}
-              logo={logo}
-              index={index}
-            />
-          ) : null
-        ))}
+          {logoMesh && logos?.map((logo, index) => (
+            logo.url ? (
+              <LogoLayer
+                key={logo.id}
+                logoMesh={logoMesh}
+                config={config}
+                logo={logo}
+                index={index}
+              />
+            ) : null
+          ))}
+        </Center>
+        {/* ✅ 2. ปิด Tag ตรงนี้ */}
+
       </group>
-      <FitToObject object={scene} padding={2.01} />
+
+      {/* ✅ ถอด <FitToObject /> ออก เพื่อไม่ให้มันไปแย่งดึงกล้องกับฟังก์ชันที่เซ็ตไว้ */}
     </>
   );
 }
@@ -1798,6 +1810,8 @@ export default function Plug3D({
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<any>(null);
+
+  // ✅ ตัวจำค่ากล้องอยู่ที่นี่แล้ว จะไม่โดนรีเฟรชหายไปไหน
   const prevViewRef = useRef<string | null>(null);
 
   const cameraPos = useMemo(() => [0, 0.1, 3] as [number, number, number], []);
@@ -1842,8 +1856,8 @@ export default function Plug3D({
           onRenderReady={onRenderReady}
           glRef={glRef}
           cameraRef={cameraRef}
-          
-
+          // ✅ ส่งข้อมูลไปยัง PlugScene
+          prevViewRef={prevViewRef}
         />
 
         <EnvErrorBoundary>
