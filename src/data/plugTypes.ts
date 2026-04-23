@@ -15,6 +15,12 @@ export const plugTypes: PlugType[] = [
     modelPath: "/models/plug/Un1.glb",
   },
   {
+    id: "TYPE-5",
+    name: "Hector",
+    thumb: "/plugs/TYPE-5/T-5.png",
+    modelPath: "/models/plug/Un5.glb",
+  },
+  {
     id: "TYPE-2",
     name: "Wallace",
     thumb: "/plugs/TYPE-2/T-2.png",
@@ -31,12 +37,6 @@ export const plugTypes: PlugType[] = [
     name: "Mulan",
     thumb: "/plugs/TYPE-4/T-4.png",
     modelPath: "/models/plug/Un4.glb",
-  },
-    {
-    id: "TYPE-5",
-    name: "Hector",
-    thumb: "/plugs/TYPE-5/T-5.png",
-    modelPath: "/models/plug/Un5.glb",
   },
 ];
 

@@ -1,7 +1,7 @@
 // src/components/PatternPicker.tsx
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 interface PatternItem {
   id: string;
@@ -10,28 +10,38 @@ interface PatternItem {
   preview: string;
 }
 
+interface PatternGroup {
+  id: string;
+  label: string;
+  items: PatternItem[];
+}
+
 interface Props {
-  patternsForSelected: PatternItem[];
+  // ✅ ของเดิมยังใช้ได้
+  patternsForSelected?: PatternItem[];
+
+  // ✅ ของใหม่: ถ้าส่งมา จะใช้แท็บแยกหมวดจริง
+  patternGroupsForSelected?: PatternGroup[];
+
   uploadedExamples: string[];
   onSelect: (imgUrl: string) => void;
 
-  // ✅ เพิ่มมาใหม่ (ของเดิมคุณ)
   onUpload: (base64: string) => void;
   onReset: () => void;
   disableReset?: boolean;
 
-  // ✅ เพิ่มให้: คุมขนาด thumbnail
-  thumbSize?: number; // px (เช่น 56/64/72)
+  thumbSize?: number;
 }
 
 export default function PatternPicker({
-  patternsForSelected,
+  patternsForSelected = [],
+  patternGroupsForSelected = [],
   uploadedExamples,
   onSelect,
   onUpload,
   onReset,
   disableReset,
-  thumbSize = 70, // ปรับค่า default ให้เป็น 70px ตามที่ส่งมาจาก Customizer
+  thumbSize = 70,
 }: Props) {
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -47,7 +57,7 @@ export default function PatternPicker({
     reader.onload = () => {
       const result = reader.result;
       if (typeof result === "string") {
-        onUpload(result); // ✅ ส่ง Base64
+        onUpload(result);
       }
     };
 
@@ -56,18 +66,70 @@ export default function PatternPicker({
     };
 
     reader.readAsDataURL(file);
-    e.currentTarget.value = ""; // ✅ เลือกไฟล์เดิมซ้ำได้
+    e.currentTarget.value = "";
   }
 
-  // ⭐️ จุดที่แก้ไข: บังคับ 3 คอลัมน์ ขนาดตาม thumbSize และจัดชิดซ้าย
+  // ✅ รองรับทั้งแบบเดิม และแบบ grouped
+  const systemGroups = useMemo<PatternGroup[]>(() => {
+    if (patternGroupsForSelected.length > 0) {
+      return patternGroupsForSelected;
+    }
+
+    return [
+      {
+        id: "system",
+        label: "ลายจากระบบ",
+        items: patternsForSelected,
+      },
+    ];
+  }, [patternGroupsForSelected, patternsForSelected]);
+
+  // ✅ เพิ่มแท็บลายอัปโหลดแยกให้อัตโนมัติ
+  const allGroups = useMemo<PatternGroup[]>(() => {
+    const groups: PatternGroup[] = [...systemGroups];
+
+    if (uploadedExamples.length > 0) {
+      groups.push({
+        id: "uploaded",
+        label: "ลายที่คุณอัปโหลด",
+        items: uploadedExamples.map((url, i) => ({
+          id: `uploaded-${i}`,
+          name: `Upload ${i + 1}`,
+          img: url,
+          preview: url,
+        })),
+      });
+    }
+
+    return groups;
+  }, [systemGroups, uploadedExamples]);
+
+  const [activeTab, setActiveTab] = useState<string>("");
+
+  useEffect(() => {
+    if (!allGroups.length) {
+      setActiveTab("");
+      return;
+    }
+
+    const exists = allGroups.some((g) => g.id === activeTab);
+    if (!exists) {
+      setActiveTab(allGroups[0].id);
+    }
+  }, [allGroups, activeTab]);
+
+  const activeGroup = allGroups.find((g) => g.id === activeTab) || allGroups[0];
+  const activeItems = activeGroup?.items ?? [];
+  const hasMultipleTabs = allGroups.length > 1;
+
+  // ✅ Auto column เต็มพื้นที่ก่อน แล้วค่อยขึ้นบรรทัดใหม่
   const gridStyle: React.CSSProperties = {
     display: "grid",
     gap: 10,
-    gridTemplateColumns: `repeat(3, ${thumbSize}px)`, 
+    gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, ${thumbSize}px))`,
     justifyContent: "start",
   };
 
-  // ✅ tile ที่สวยขึ้น + ไม่ยืดภาพ
   const tileStyle: React.CSSProperties = {
     width: "100%",
     aspectRatio: "1 / 1",
@@ -87,7 +149,6 @@ export default function PatternPicker({
     display: "block",
   };
 
-  // ปรับขนาดฟอนต์ของ Caption ลงเล็กน้อยเพื่อให้พอดีกับกล่อง 70px
   const capStyle: React.CSSProperties = {
     position: "absolute",
     left: 4,
@@ -114,23 +175,71 @@ export default function PatternPicker({
     opacity: 0.8,
   };
 
+  // ✅ แท็บเลื่อนซ้ายขวาได้ ไม่ wrap หลายบรรทัด
+  const tabsWrapStyle: React.CSSProperties = {
+    display: "flex",
+    gap: 8,
+    flexWrap: "nowrap",
+    overflowX: "auto",
+    overflowY: "hidden",
+    paddingBottom: 4,
+    marginBottom: 12,
+    scrollbarWidth: "thin",
+  };
+
+  function renderTile(item: PatternItem) {
+    return (
+      <div
+        key={item.id}
+        role="button"
+        tabIndex={0}
+        title={item.name}
+        onClick={() => onSelect(item.img)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") onSelect(item.img);
+        }}
+        style={tileStyle}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
+          (e.currentTarget as HTMLDivElement).style.boxShadow = "0 6px 12px rgba(30,55,90,.12)";
+          (e.currentTarget as HTMLDivElement).style.borderColor = "#3b82f6";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
+          (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
+          (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(210,218,235,.9)";
+        }}
+      >
+        <img src={item.preview || item.img} alt={item.name} style={imgStyle} />
+        <div style={capStyle}>{item.name}</div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      {/* ✅ แถบปุ่ม (แยกโซนปุ่มออกมาชัดเจน ไม่ให้ไปปนกับ Grid รูปภาพ) */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
-        
-        {/* กล่องซ้าย: เลเบลข้อความแนะนำ */}
+      {/* แถบปุ่มเดิม */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          marginBottom: 12,
+          flexWrap: "wrap",
+          justifyContent: "space-between",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>เลือกลายด้านล่าง</span>
+          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>
+            เลือกลายด้านล่าง
+          </span>
         </div>
 
-        {/* กล่องขวา: ปุ่มอัปโหลด & รีเซ็ต */}
         <div style={{ display: "flex", gap: 8 }}>
           <label
             style={{
               padding: "6px 10px",
               background: "rgba(0, 179, 185, 0.95)",
-              color: "#fff", // เพิ่มสีตัวหนังสือเป็นสีขาว
+              color: "#fff",
               borderRadius: 8,
               cursor: "pointer",
               border: "1px solid rgba(0, 150, 150, 0.9)",
@@ -156,7 +265,7 @@ export default function PatternPicker({
               borderRadius: 8,
               border: "1px solid rgba(160, 0, 0, 0.9)",
               background: "rgba(200, 30, 30, 0.9)",
-              color: "#fff", // เพิ่มสีตัวหนังสือเป็นสีขาว
+              color: "#fff",
               fontSize: 12,
               fontWeight: 900,
               cursor: disableReset ? "not-allowed" : "pointer",
@@ -173,74 +282,47 @@ export default function PatternPicker({
 
       <div style={{ height: 1, background: "rgba(226,232,240,1)", margin: "0 0 12px 0" }} />
 
-      {/* ✅ ลายพื้นฐาน */}
-      <div style={sectionTitle}>ลายจากระบบ</div>
-      {patternsForSelected.length === 0 ? (
-        <div style={{ fontSize: 12, opacity: 0.65 }}>ไม่มีลวดลายสำหรับรุ่นนี้</div>
-      ) : (
-        <div style={gridStyle}>
-          {patternsForSelected.map((p) => (
-            <div
-              key={p.id}
-              role="button"
-              tabIndex={0}
-              title={p.name}
-              onClick={() => onSelect(p.img)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") onSelect(p.img);
-              }}
-              style={tileStyle}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
-                (e.currentTarget as HTMLDivElement).style.boxShadow = "0 6px 12px rgba(30,55,90,.12)";
-                (e.currentTarget as HTMLDivElement).style.borderColor = "#3b82f6";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-                (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
-                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(210,218,235,.9)";
-              }}
-            >
-              <img src={p.preview || p.img} alt={p.name} style={imgStyle} />
-              <div style={capStyle}>{p.name}</div>
-            </div>
-          ))}
+      {/* แท็บ */}
+      {hasMultipleTabs && (
+        <div style={tabsWrapStyle}>
+          {allGroups.map((group) => {
+            const isActive = group.id === activeGroup?.id;
+            return (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => setActiveTab(group.id)}
+                style={{
+                  padding: "7px 12px",
+                  borderRadius: 999,
+                  border: isActive
+                    ? "1px solid rgba(37,99,235,.95)"
+                    : "1px solid rgba(210,218,235,.95)",
+                  background: isActive
+                    ? "linear-gradient(180deg, rgba(59,130,246,.98), rgba(37,99,235,.98))"
+                    : "rgba(255,255,255,.92)",
+                  color: isActive ? "#fff" : "#334155",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  boxShadow: isActive ? "0 8px 16px rgba(37,99,235,.18)" : "none",
+                  flex: "0 0 auto",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {group.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {/* ✅ ลายอัปโหลด */}
-      {uploadedExamples.length > 0 && (
-        <>
-          <div style={{ ...sectionTitle, marginTop: 16 }}>ลายที่คุณอัปโหลด</div>
-          <div style={gridStyle}>
-            {uploadedExamples.map((url, i) => (
-              <div
-                key={i}
-                role="button"
-                tabIndex={0}
-                title="คลิกเพื่อเลือกใช้ลายนี้"
-                onClick={() => onSelect(url)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") onSelect(url);
-                }}
-                style={tileStyle}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = "0 6px 12px rgba(30,55,90,.12)";
-                  (e.currentTarget as HTMLDivElement).style.borderColor = "#3b82f6";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-                  (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
-                  (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(210,218,235,.9)";
-                }}
-              >
-                <img src={url} alt={`upload-${i}`} style={imgStyle} />
-                <div style={capStyle}>Upload {i + 1}</div>
-              </div>
-            ))}
-          </div>
-        </>
+      {!!activeGroup && <div style={sectionTitle}>{activeGroup.label}</div>}
+
+      {activeItems.length === 0 ? (
+        <div style={{ fontSize: 12, opacity: 0.65 }}>ไม่มีลวดลายในหมวดนี้</div>
+      ) : (
+        <div style={gridStyle}>{activeItems.map(renderTile)}</div>
       )}
     </div>
   );

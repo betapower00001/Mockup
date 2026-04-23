@@ -1,9 +1,9 @@
 // src/components/PlugCustomizer.tsx
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import plugTypes from "../data/plugTypes";
-import patterns from "../data/patterns";
+import { getPatternGroupsByType  } from "../data/patterns";
 import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName } from "./Plug3D";
 import ColorPicker from "./ColorPicker";
 import PlugSelector from "./PlugSelector";
@@ -35,7 +35,6 @@ export type LogoTransform = {
   rot: number;
 };
 
-// ✅ เพิ่ม Type สำหรับเก็บข้อมูล 3 โลโก้
 export type LogoItem = {
   id: string;
   url: string;
@@ -43,6 +42,7 @@ export type LogoItem = {
 };
 
 type StepId = "model" | "color" | "pattern" | "logo" | "view";
+type OrbitNudgeDirection = "left" | "right" | "up" | "down";
 
 /* =========================
    Defaults / Helpers
@@ -52,7 +52,7 @@ const STEPS: { id: StepId; title: string; sub: string }[] = [
   { id: "model", title: "1) เลือกรุ่น", sub: "เลือกรุ่นปลั๊กที่ต้องการ" },
   { id: "color", title: "2) เลือกสี", sub: "ปรับสีฝาบน/ฝาล่าง" },
   { id: "pattern", title: "3) เลือกลาย", sub: "เลือกลวดลาย + เลื่อน/ซูม/หมุน" },
-  { id: "logo", title: "4) ใส่โลโก้", sub: "อัปโหลด 3 ตำแหน่ง + ปรับแต่ง" }, // อัปเดตข้อความ
+  { id: "logo", title: "4) ใส่โลโก้", sub: "อัปโหลด 3 ตำแหน่ง + ปรับแต่ง" },
   { id: "view", title: "5) มุมมอง", sub: "เลือกมุมมองสำหรับโชว์/ดาวน์โหลด" },
 ];
 
@@ -71,7 +71,6 @@ const DEFAULT_LOGO_TRANSFORM: LogoTransform = {
   rot: 0,
 };
 
-// ✅ ค่าเริ่มต้นของโลโก้ทั้ง 3 ช่อง
 const DEFAULT_LOGOS: LogoItem[] = [
   { id: "logo-1", url: "", transform: { ...DEFAULT_LOGO_TRANSFORM } },
   { id: "logo-2", url: "", transform: { ...DEFAULT_LOGO_TRANSFORM } },
@@ -284,8 +283,8 @@ function cropTransparentBounds(img: HTMLImageElement, alphaThreshold = 8) {
 
 function ensureAllowedColor(color: string, options: { label: string; value: string }[]) {
   const normalized = normalizeHex(color) ?? "";
-  const found = options.find((o) => (normalizeHex(o.value) ?? "") === normalized);
-  return found ? found.value : options[0].value;
+  if (normalized.startsWith("#")) return normalized;
+  return options[0]?.value ?? "#ffffff";
 }
 
 function clamp(n: number, a: number, b: number) {
@@ -325,7 +324,6 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [dragLogoMode, setDragLogoMode] = useState(false);
   const [dragPatternMode, setDragPatternMode] = useState(false);
 
-  // ✅ State สำหรับจัดการ 3 โลโก้
   const [logos, setLogos] = useState<LogoItem[]>(DEFAULT_LOGOS);
   const [activeLogoId, setActiveLogoId] = useState<string>("logo-1");
   const activeLogo = logos.find((l) => l.id === activeLogoId) || logos[0];
@@ -334,6 +332,26 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [patternRotation, setPatternRotation] = useState<number>(0);
 
   const [uploadedPatterns, setUploadedPatterns] = useState<string[]>([]);
+  const [orbitNudgeTick, setOrbitNudgeTick] = useState(0);
+  const [orbitNudgeDirection, setOrbitNudgeDirection] = useState<OrbitNudgeDirection | null>(null);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mq = window.matchMedia("(max-width: 768px)");
+    const apply = () => setIsMobileLayout(mq.matches);
+
+    apply();
+
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    }
+
+    mq.addListener(apply);
+    return () => mq.removeListener(apply);
+  }, []);
 
   const renderRef = useRef<PlugRenderFn | null>(null);
 
@@ -375,10 +393,17 @@ export default function PlugCustomizer({ plugId }: Props) {
     currentColorOptions,
   ]);
 
-  // ✅ เช็คว่ามีโลโก้อย่างน้อย 1 อันที่อัปโหลดไว้หรือไม่
   const hasLogo = logos.some((l) => l.url !== "");
   const hasPattern = !!customization.patternUrl && customization.patternUrl.trim() !== "";
   const currentStepIdx = stepIndex(step);
+
+  const showQuickBottom = selectedPlugId !== "TYPE-4";
+  const showQuickSwitch =
+    selectedPlugId !== "TYPE-1" &&
+    selectedPlugId !== "TYPE-3" &&
+    selectedPlugId !== "TYPE-4";
+
+  const quickColorCount = 1 + (showQuickBottom ? 1 : 0) + (showQuickSwitch ? 1 : 0);
 
   function patchCustomization(patch: Partial<CustomizationState>) {
     setCustomization((s) => {
@@ -394,7 +419,6 @@ export default function PlugCustomizer({ plugId }: Props) {
     });
   }
 
-  // ✅ รีเซ็ตโลโก้ทั้งหมด
   function resetLogo() {
     setLogos(DEFAULT_LOGOS);
     setDragLogoMode(false);
@@ -424,21 +448,66 @@ export default function PlugCustomizer({ plugId }: Props) {
     setDragPatternMode(false);
   }
 
-  // ✅ จัดการเมื่อเลือกไฟล์โลโก้
   function handleLogoSelect(id: string, url: string) {
     setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, url } : l)));
     setActiveLogoId(id);
     setStep("logo");
   }
 
-  // ✅ จัดการเมื่อลบโลโก้
   function handleLogoRemove(id: string) {
     setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, url: "" } : l)));
   }
 
-  // ✅ จัดการเปลี่ยนแปลง Scale, Rotation, X, Y ของโลโก้ตัวที่กำลังเลือก
   function handleLogoTransformChange(id: string, newTransform: LogoTransform) {
     setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, transform: newTransform } : l)));
+  }
+
+  function renderQuickColorCard(args: {
+    label: string;
+    sub: string;
+    value: string;
+    fallback: string;
+    onChange: (color: string) => void;
+    onReset: () => void;
+    title: string;
+  }) {
+    const hex = normalizeHex(args.value) ?? args.fallback;
+
+    return (
+      <div className="qa-colorCard">
+        <div className="qa-colorTop">
+          <div>
+            <div className="qa-colorTitle">{args.label}</div>
+            <div className="qa-colorSub">{args.sub}</div>
+          </div>
+
+          <span className="qa-colorBadge">{hex.toUpperCase()}</span>
+        </div>
+
+        <div className="qa-colorRow">
+          <div className="qa-colorPickerGroup">
+            <label className="qa-colorInputWrap" title={args.title}>
+              <input
+                type="color"
+                className="qa-colorInput"
+                value={hex}
+                onChange={(e) => args.onChange(e.target.value)}
+              />
+              <span className="qa-colorPreview" style={{ background: hex }} />
+            </label>
+
+            <div className="qa-colorMeta">
+              <span className="qa-colorMetaLabel">สีปัจจุบัน</span>
+              <span className="qa-colorMetaValue">{hex.toUpperCase()}</span>
+            </div>
+          </div>
+
+          <button type="button" className="btn btnGhost qa-smallBtn" onClick={args.onReset}>
+            รีเซ็ต
+          </button>
+        </div>
+      </div>
+    );
   }
 
   async function downloadA4Sheet() {
@@ -446,15 +515,25 @@ export default function PlugCustomizer({ plugId }: Props) {
     if (!render) return;
 
     const captures = await Promise.all(
-      A4_VIEWS.map(async (item) => ({
-        label: item.label,
-        src: await render({
+      A4_VIEWS.map(async (item) => {
+        const rawSrc = await render({
           transparent: true,
           view: item.key,
           download: false,
           filename: `plug-${selectedPlugId}-${item.key}.png`,
-        }),
-      }))
+        });
+
+        const finalSrc = rawSrc
+          ? item.key === "top"
+            ? await rotateImage180DataUrl(rawSrc)
+            : rawSrc
+          : null;
+
+        return {
+          label: item.label,
+          src: finalSrc,
+        };
+      })
     );
 
     const validCaptures = captures.filter((item): item is { label: string; src: string } => typeof item.src === "string" && item.src.length > 0);
@@ -557,6 +636,55 @@ export default function PlugCustomizer({ plugId }: Props) {
     link.click();
   }
 
+  async function rotateImage180DataUrl(src: string) {
+    const img = await loadImage(src);
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(Math.PI);
+    ctx.drawImage(
+      img,
+      -(img.naturalWidth || img.width) / 2,
+      -(img.naturalHeight || img.height) / 2,
+      img.naturalWidth || img.width,
+      img.naturalHeight || img.height
+    );
+
+    return canvas.toDataURL("image/png");
+  }
+
+  async function downloadViewImage(view: RenderViewName, filename?: string) {
+    const render = renderRef.current;
+    if (!render) return;
+
+    const src = await render({
+      transparent: true,
+      view,
+      download: false,
+      filename: filename ?? `plug-${selectedPlugId}-${view}.png`,
+    });
+
+    if (!src) return;
+
+    const finalSrc = view === "top" ? await rotateImage180DataUrl(src) : src;
+    if (!finalSrc) return;
+
+    const link = document.createElement("a");
+    link.href = finalSrc;
+    link.download = filename ?? `plug-${selectedPlugId}-${view}.png`;
+    link.click();
+  }
+
+  async function downloadProductionSampleTop() {
+    await downloadViewImage("top", `plug-${selectedPlugId}-production-sample-top-flipped.png`);
+  }
+
   function handlePatternUpload(base64: string) {
     setUploadedPatterns((prev) => [base64, ...prev]);
     patchCustomization({ patternUrl: base64 });
@@ -572,6 +700,11 @@ export default function PlugCustomizer({ plugId }: Props) {
       x: clamp(s.x + dx, 0, 1),
       y: clamp(s.y + dy, 0, 1),
     }));
+  }
+
+  function nudgeOrbit(direction: OrbitNudgeDirection) {
+    setOrbitNudgeDirection(direction);
+    setOrbitNudgeTick((n) => n + 1);
   }
 
   function handleChangeModel(id: string) {
@@ -646,15 +779,14 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="hint">ปรับสีส่วนประกอบหลักของชิ้นงาน</div>
 
           <div style={{ marginTop: 10 }}>
-            {/* ✅ ถ้าเป็น TYPE-4 ให้เปลี่ยนชื่อ Label เป็น "สีตัวปลั๊ก" */}
             <ColorPicker
               label={selectedPlugId === "TYPE-4" ? "สีตัวปลั๊ก" : "ฝาบน"}
               initialColor={customization.topColor}
               options={currentColorOptions.top}
               onColorChange={(c) => patchCustomization({ topColor: c })}
+              allowCustom
             />
 
-            {/* ✅ ซ่อนฝาล่าง ถ้าเป็น TYPE-4 */}
             {selectedPlugId !== "TYPE-4" && (
               <>
                 <div style={{ height: 10 }} />
@@ -663,11 +795,11 @@ export default function PlugCustomizer({ plugId }: Props) {
                   initialColor={customization.bottomColor}
                   options={currentColorOptions.bottom}
                   onColorChange={(c) => patchCustomization({ bottomColor: c })}
+                  allowCustom
                 />
               </>
             )}
 
-            {/* ✅ ซ่อนสวิตช์ ถ้าเป็น TYPE-1, 3, 4 */}
             {selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && selectedPlugId !== "TYPE-4" && (
               <>
                 <div style={{ height: 10 }} />
@@ -676,6 +808,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                   initialColor={customization.switchColor}
                   options={currentColorOptions.switch ?? currentColorOptions.top}
                   onColorChange={(c) => patchCustomization({ switchColor: c })}
+                  allowCustom
                 />
               </>
             )}
@@ -713,7 +846,7 @@ export default function PlugCustomizer({ plugId }: Props) {
 
           <div className="patternScroll" style={{ maxHeight: 220, marginTop: 10 }}>
             <PatternPicker
-              patternsForSelected={patterns[selectedPlugId] || []}
+              patternGroupsForSelected={getPatternGroupsByType(selectedPlugId)}
               uploadedExamples={uploadedPatterns}
               onSelect={(imgUrl: string) => {
                 patchCustomization({ patternUrl: imgUrl });
@@ -873,7 +1006,6 @@ export default function PlugCustomizer({ plugId }: Props) {
       );
     }
 
-    // ✅ UI ฝั่งโลโก้แบบ 3 อัน
     if (step === "logo") {
       return (
         <div>
@@ -889,7 +1021,6 @@ export default function PlugCustomizer({ plugId }: Props) {
 
           <div className="divider" />
 
-          {/* กล่องอัปโหลด 3 ช่อง */}
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {logos.map((logo, index) => {
               const isActive = activeLogoId === logo.id;
@@ -992,10 +1123,20 @@ export default function PlugCustomizer({ plugId }: Props) {
                 view: customization.view,
               });
             }}
+            onDownloadTop={() => {
+              void downloadViewImage("top", `plug-${selectedPlugId}-top.png`);
+            }}
+            onDownloadProductionSample={() => {
+              void downloadProductionSampleTop();
+            }}
             onDownloadA4={() => {
               void downloadA4Sheet();
             }}
-          />        </div>
+            onDownloadView={(view) => {
+              void downloadViewImage(view, `plug-${selectedPlugId}-${view}.png`);
+            }}
+          />
+        </div>
 
         <div className="divider" />
 
@@ -1012,13 +1153,18 @@ export default function PlugCustomizer({ plugId }: Props) {
     );
   }
 
+  // ============================================
+  // ปรับปรุงส่วน UI Layout และ DOM Structure ตรงนี้
+  // ============================================
   return (
     <div className="pc-wrap">
       <style>{CSS}</style>
 
       <div className="pc-grid">
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div className="card">
+
+        {/* === ฝั่งซ้าย: Mockup และ Quick Actions === */}
+        <div className="left-panel">
+          <div className="card left-card-top">
             <div className="head">
               <div>
                 <h3 className="title">Mockup</h3>
@@ -1029,8 +1175,8 @@ export default function PlugCustomizer({ plugId }: Props) {
               </button>
             </div>
 
-            <div className="body">
-              <div className="mock">
+            <div className="body" style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+              <div className="mock mockWithOverlay">
                 <Plug3D
                   key={plugConfig.modelPath}
                   config={plugConfig}
@@ -1045,10 +1191,69 @@ export default function PlugCustomizer({ plugId }: Props) {
                   dragLogoMode={dragLogoMode && activeLogo.url !== ""}
                   dragPatternMode={dragPatternMode && hasPattern}
                   view={customization.view}
+                  orbitNudgeDirection={orbitNudgeDirection}
+                  orbitNudgeTick={orbitNudgeTick}
                   onRenderReady={(render) => {
                     renderRef.current = render;
                   }}
                 />
+                {isMobileLayout && (
+                  <div className="mobileOrbitOverlay" aria-label="ปุ่มหมุน 3D บนมือถือ">
+                    <div className="orbitPad">
+                      <div className="orbitPadHint">หมุน 3D</div>
+
+                      <div className="orbitPadGrid">
+                        <div />
+                        <button
+                          type="button"
+                          className="orbitArrow"
+                          onClick={() => nudgeOrbit("up")}
+                          title="หมุนขึ้น"
+                          aria-label="หมุนขึ้น"
+                        >
+                          <span>⌃</span>
+                        </button>
+                        <div />
+
+                        <button
+                          type="button"
+                          className="orbitArrow"
+                          onClick={() => nudgeOrbit("left")}
+                          title="หมุนซ้าย"
+                          aria-label="หมุนซ้าย"
+                        >
+                          <span>‹</span>
+                        </button>
+
+                        <div className="orbitPadCenter" aria-hidden="true">
+                          <span className="orbitPadDot" />
+                        </div>
+
+                        <button
+                          type="button"
+                          className="orbitArrow"
+                          onClick={() => nudgeOrbit("right")}
+                          title="หมุนขวา"
+                          aria-label="หมุนขวา"
+                        >
+                          <span>›</span>
+                        </button>
+
+                        <div />
+                        <button
+                          type="button"
+                          className="orbitArrow"
+                          onClick={() => nudgeOrbit("down")}
+                          title="หมุนลง"
+                          aria-label="หมุนลง"
+                        >
+                          <span>⌄</span>
+                        </button>
+                        <div />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
@@ -1064,34 +1269,104 @@ export default function PlugCustomizer({ plugId }: Props) {
             </div>
           </div>
 
-          <div className="card">
+          <div className="card quickActionsCard">
             <div className="head">
               <div>
                 <h3 className="title">Quick Actions</h3>
-                <p className="sub">ทางลัดการปรับแต่ง</p>
+                <p className="sub">ทางลัดการปรับแต่ง + สีด่วนตามประเภทปลั๊ก</p>
               </div>
             </div>
+
             <div className="body">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <div className="row">
-                  {/* ทางลัดโลโก้ จะเปลี่ยนเป็นปุ่มไปที่หน้าแก้ไขโลโก้แทนเพื่อลดความสับสน */}
-                  <button type="button" className="btn btnGhost" onClick={() => setStep("logo")}>
-                    ⚙️ ปรับแต่งโลโก้ (3 จุด)
-                  </button>
-                  <button type="button" className="btn btnGhost" onClick={resetLogo} disabled={!hasLogo}>
-                    ล้างโลโก้ทั้งหมด
-                  </button>
+              <div className="qa-stack">
+                <div className="qa-toolbar">
+                  <div className="qa-toolbarGroup">
+                    <button type="button" className="btn btnGhost" onClick={() => setStep("logo")}>
+                      ⚙️ ปรับแต่งโลโก้ (3 จุด)
+                    </button>
+                    <button type="button" className="btn btnGhost" onClick={resetLogo} disabled={!hasLogo}>
+                      ล้างโลโก้ทั้งหมด
+                    </button>
+                  </div>
+
+                  <div className="qa-toolbarGroup">
+                    <button type="button" className="btn btnGhost" onClick={resetPattern} disabled={!hasPattern}>
+                      ล้างลาย
+                    </button>
+                  </div>
                 </div>
-                <button type="button" className="btn btnGhost" onClick={resetPattern} disabled={!hasPattern}>
-                  ล้างลาย
-                </button>
+
+                <div className="divider" style={{ margin: "2px 0" }} />
+
+                <div className="qa-colorSection">
+                  <div className="qa-sectionHead">
+                    <div>
+                      <div className="label">สีอิสระแบบด่วน</div>
+                      <div className="hint" style={{ marginTop: 4 }}>
+                        คงการเลือกสีอิสระในหน้า “เลือกสี” ไว้เหมือนเดิม และเพิ่มโซนนี้สำหรับปรับเร็วบนจอคอม
+                      </div>
+                    </div>
+
+                    <span className="badgeSoft">
+                      {plug.name ?? selectedPlugId} • {selectedPlugId === "TYPE-4" ? "สีเดียวทั้งชิ้น" : showQuickSwitch ? "3 ส่วน" : "2 ส่วน"}
+                    </span>
+                  </div>
+
+                  <div
+                    className={`qa-colorGrid ${quickColorCount === 1 ? "single" : ""} ${quickColorCount === 2 ? "double" : ""} ${quickColorCount === 3 ? "triple" : ""}`}
+                  >
+                    {renderQuickColorCard({
+                      label: selectedPlugId === "TYPE-4" ? "สีตัวปลั๊ก" : "ฝาบน",
+                      sub: selectedPlugId === "TYPE-4"
+                        ? "รุ่นนี้ใช้สีเดียวทั้งชิ้น เปลี่ยนตรงนี้แล้วจะอัปเดตทั้งบนและล่าง"
+                        : "ส่วนบนของตัวปลั๊ก",
+                      value: customization.topColor,
+                      fallback: currentColorOptions.top[0]?.value ?? "#ffffff",
+                      onChange: (color) => patchCustomization({ topColor: color }),
+                      onReset: () =>
+                        patchCustomization({
+                          topColor: currentColorOptions.top[0]?.value ?? "#ffffff",
+                        }),
+                      title: selectedPlugId === "TYPE-4" ? "เลือกสีตัวปลั๊ก" : "เลือกสีฝาบน",
+                    })}
+
+                    {showQuickBottom &&
+                      renderQuickColorCard({
+                        label: "ฝาล่าง",
+                        sub: "ส่วนล่างของตัวปลั๊ก",
+                        value: customization.bottomColor,
+                        fallback: currentColorOptions.bottom[0]?.value ?? "#eaeaea",
+                        onChange: (color) => patchCustomization({ bottomColor: color }),
+                        onReset: () =>
+                          patchCustomization({
+                            bottomColor: currentColorOptions.bottom[0]?.value ?? "#eaeaea",
+                          }),
+                        title: "เลือกสีฝาล่าง",
+                      })}
+
+                    {showQuickSwitch &&
+                      renderQuickColorCard({
+                        label: "สวิตช์",
+                        sub: "ปรับสีสวิตช์แยกได้สำหรับรุ่นที่รองรับ",
+                        value: customization.switchColor,
+                        fallback: (currentColorOptions.switch ?? currentColorOptions.top)[0]?.value ?? "#ffffff",
+                        onChange: (color) => patchCustomization({ switchColor: color }),
+                        onReset: () =>
+                          patchCustomization({
+                            switchColor: (currentColorOptions.switch ?? currentColorOptions.top)[0]?.value ?? "#ffffff",
+                          }),
+                        title: "เลือกสีสวิตช์",
+                      })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="sticky">
-          <div className="card">
+        {/* === ฝั่งขวา: Steps และเครื่องมือปรับแต่งแบบ Scroll === */}
+        <div className="right-panel">
+          <div className="card config-card">
             <div className="head">
               <div>
                 <h3 className="title">ขั้นตอนการปรับแต่ง</h3>
@@ -1142,7 +1417,6 @@ export default function PlugCustomizer({ plugId }: Props) {
                   </div>
                 </div>
               </div>
-
             </div>
           </div>
         </div>
@@ -1208,34 +1482,82 @@ function Slider({
   );
 }
 
+// ============================================
+// ปรับปรุงส่วน CSS สำหรับ Desktop Web App View
+// ============================================
 const CSS = `
   .pc-wrap{
-    min-height: 100vh;
-    padding: 14px;
+    height: 100vh;
+    overflow: hidden;
+    padding: 16px;
+    box-sizing: border-box;
     background:
       radial-gradient(900px 500px at 10% 0%, rgba(59,130,246,.22), transparent 60%),
       radial-gradient(900px 500px at 90% 10%, rgba(168,85,247,.16), transparent 55%),
       linear-gradient(180deg, #f7f9ff, #eef2ff 60%, #f8fafc);
+    display: flex;
+    flex-direction: column;
   }
 
   .pc-grid{
-    max-width: 1440px; 
+    flex: 1;
+    max-width: 1600px; 
+    width: 100%;
     margin: 0 auto;
     display: grid;
     gap: 16px;
-    grid-template-columns: 1fr 1.4fr;
-    align-items: start;
+    grid-template-columns: minmax(500px, 1.2fr) minmax(400px, 1fr);
+    min-height: 0;
   }
 
-  :root{ --mockH: 480px; }
-  @media (max-height: 820px){ :root{ --mockH: 440px; } }
-  @media (max-height: 740px){ :root{ --mockH: 400px; } }
+  /* === Left Panel Scroll Behavior === */
+  .left-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .left-card-top {
+    display: flex;
+    flex-direction: column;
+    flex: 1; 
+    min-height: 480px; 
+  }
+
+  .mock{
+    flex: 1; 
+    width: 100%;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #0b2447, #e8eefc);
+    border: 1px solid rgba(226,232,240,.9);
+    overflow: hidden;
+    min-height: 350px;
+  }
+
+  /* === Right Panel Scroll Behavior === */
+  .right-panel {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .config-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
 
   .config-layout {
     display: grid;
-    grid-template-columns: 180px 1px 1fr;
+    grid-template-columns: 160px 1px 1fr;
     gap: 16px;
-    min-height: var(--mockH);
+    flex: 1;
+    min-height: 0;
   }
 
   .config-divider {
@@ -1247,12 +1569,44 @@ const CSS = `
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
   }
 
-  @media (max-width: 1100px){
-    .pc-grid{ grid-template-columns: 1fr; }
-    .sticky{ position: static !important; }
-    
+  /* Custom Scrollbar for Inner Containers */
+  .left-panel::-webkit-scrollbar,
+  .config-content > div::-webkit-scrollbar {
+    width: 6px;
+  }
+  .left-panel::-webkit-scrollbar-track,
+  .config-content > div::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .left-panel::-webkit-scrollbar-thumb,
+  .config-content > div::-webkit-scrollbar-thumb {
+    background: rgba(148,163,184,.3);
+    border-radius: 10px;
+  }
+  .left-panel::-webkit-scrollbar-thumb:hover,
+  .config-content > div::-webkit-scrollbar-thumb:hover {
+    background: rgba(100,116,139,.5);
+  }
+
+  /* === Mobile & Tablet Fallback === */
+  @media (max-width: 1180px){
+    .pc-wrap {
+      height: auto;
+      min-height: 100vh;
+      overflow: auto;
+    }
+    .pc-grid { 
+      grid-template-columns: 1fr; 
+      height: auto;
+    }
+    .left-panel, .right-panel {
+      height: auto;
+      overflow: visible;
+      padding-right: 0;
+    }
     .config-layout { 
       grid-template-columns: 1fr; 
       min-height: auto; 
@@ -1260,10 +1614,14 @@ const CSS = `
     .config-divider { 
       width: 100%; 
       height: 1px; 
-      margin: 4px 0; 
+      margin: 8px 0; 
+    }
+    .mock {
+      min-height: 400px;
     }
   }
 
+  /* === Common Styles === */
   .card{
     background: rgba(255,255,255,.94);
     border: 1px solid rgba(226,232,240,.9);
@@ -1287,14 +1645,6 @@ const CSS = `
 
   .body{ padding: 12px; }
 
-  .mock{
-    height: var(--mockH);
-    border-radius: 14px;
-    background: linear-gradient(180deg, #0b2447, #e8eefc);
-    border: 1px solid rgba(226,232,240,.9);
-    overflow: hidden;
-  }
-
   .label{
     font-size:12.5px;
     font-weight: 900;
@@ -1312,7 +1662,6 @@ const CSS = `
 
   .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .divider{ height:1px; background: rgba(226,232,240,.9); margin:10px 0; }
-  .sticky{ position: sticky; top: 12px; }
 
   .btn{
     padding: 7px 12px;
@@ -1472,6 +1821,302 @@ const CSS = `
   }
   .miniBtnWide:hover{ transform: translateY(-1px); box-shadow: 0 14px 24px rgba(15,23,42,.14); }
   .miniBtnWide:disabled{ opacity:.5; cursor:not-allowed; transform:none; box-shadow:none; }
+
+  .qa-stack{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+
+  .qa-toolbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .qa-toolbarGroup{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .qa-colorSection{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+
+  .qa-sectionHead{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .qa-colorGrid{
+    display:grid;
+    gap:12px;
+    align-items:stretch;
+  }
+
+  .qa-colorGrid.single{
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qa-colorGrid.double{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qa-colorGrid.triple{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .qa-colorCard{
+    min-width:0;
+    padding:14px;
+    border-radius:16px;
+    border:1px solid rgba(148,163,184,.22);
+    background: linear-gradient(180deg, rgba(248,250,252,.96), rgba(255,255,255,.98));
+    box-shadow: 0 12px 22px rgba(15,23,42,.06);
+  }
+
+  .qa-colorTop{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:12px;
+  }
+
+  .qa-colorTitle{
+    font-size:13px;
+    font-weight:900;
+    color:#0f172a;
+    letter-spacing:.2px;
+  }
+
+  .qa-colorSub{
+    margin-top:4px;
+    font-size:12px;
+    color:#475569;
+    line-height:1.45;
+  }
+
+  .qa-colorBadge{
+    padding:6px 10px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:.4px;
+    color:#0f172a;
+    background:rgba(255,255,255,.92);
+    border:1px solid rgba(148,163,184,.24);
+    white-space:nowrap;
+  }
+
+  .qa-colorRow{
+    margin-top:14px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .qa-colorPickerGroup{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+    min-width:0;
+  }
+
+  .qa-colorInputWrap{
+    position:relative;
+    width:56px;
+    height:56px;
+    border-radius:16px;
+    overflow:hidden;
+    background:#ffffff;
+    border:1px solid rgba(148,163,184,.26);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.65),
+      0 10px 18px rgba(15,23,42,.08);
+    cursor:pointer;
+    flex-shrink:0;
+  }
+
+  .qa-colorInput{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    opacity:0;
+    cursor:pointer;
+  }
+
+  .qa-colorPreview{
+    position:absolute;
+    inset:6px;
+    border-radius:12px;
+    border:1px solid rgba(15,23,42,.12);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.45);
+  }
+
+  .qa-colorMeta{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    min-width:0;
+  }
+
+  .qa-colorMetaLabel{
+    font-size:11px;
+    font-weight:700;
+    color:#64748b;
+  }
+
+  .qa-colorMetaValue{
+    font-size:13px;
+    font-weight:900;
+    color:#0f172a;
+    letter-spacing:.3px;
+    word-break:break-all;
+  }
+
+  .qa-smallBtn{
+    min-width:88px;
+  }
+
+  @media (max-width: 1380px){
+    .qa-colorGrid.triple{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 820px){
+    .qa-colorGrid.double,
+    .qa-colorGrid.triple{
+      grid-template-columns: 1fr;
+    }
+
+    .qa-toolbar{
+      align-items:stretch;
+    }
+
+    .qa-toolbarGroup{
+      width:100%;
+    }
+
+    .qa-toolbarGroup .btn{
+      flex:1;
+      justify-content:center;
+    }
+  }
+
+  .mockWithOverlay{
+    position:relative;
+  }
+
+  .mobileOrbitOverlay{
+    display:none;
+  }
+
+  @media (max-width: 768px){
+    .quickActionsCard{
+      display:none;
+    }
+
+    .mobileOrbitOverlay{
+      position:absolute;
+      right:12px;
+      bottom:12px;
+      z-index:20;
+      display:block;
+      pointer-events:none;
+    }
+
+    .orbitPad{
+      pointer-events:auto;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:8px;
+      padding:10px 10px 12px;
+      border-radius:20px;
+      background:rgba(255,255,255,.68);
+      border:1px solid rgba(255,255,255,.72);
+      box-shadow:0 14px 30px rgba(15,23,42,.16);
+      backdrop-filter:blur(12px);
+      -webkit-backdrop-filter:blur(12px);
+    }
+
+    .orbitPadHint{
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.08em;
+      color:#64748b;
+      text-transform:uppercase;
+      user-select:none;
+    }
+
+    .orbitPadGrid{
+      display:grid;
+      grid-template-columns:repeat(3, 42px);
+      grid-template-rows:repeat(3, 42px);
+      gap:6px;
+      align-items:center;
+      justify-items:center;
+    }
+
+    .orbitArrow{
+      width:42px;
+      height:42px;
+      border:none;
+      border-radius:14px;
+      background:rgba(255,255,255,.9);
+      color:#334155;
+      display:grid;
+      place-items:center;
+      cursor:pointer;
+      user-select:none;
+      -webkit-tap-highlight-color:transparent;
+      box-shadow:0 8px 18px rgba(15,23,42,.08);
+      transition:transform .12s ease, box-shadow .18s ease, background .18s ease, color .18s ease;
+    }
+
+    .orbitArrow span{
+      font-size:24px;
+      line-height:1;
+      font-weight:900;
+      transform:translateY(-1px);
+    }
+
+    .orbitArrow:active{
+      transform:scale(.95);
+      background:rgba(239,246,255,.96);
+      color:#1d4ed8;
+      box-shadow:0 10px 18px rgba(37,99,235,.16);
+    }
+
+    .orbitPadCenter{
+      width:42px;
+      height:42px;
+      display:grid;
+      place-items:center;
+    }
+
+    .orbitPadDot{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      background:rgba(148,163,184,.7);
+      box-shadow:0 0 0 6px rgba(148,163,184,.12);
+    }
+  }
 
   input[type="range"]{
     accent-color: #2563eb;

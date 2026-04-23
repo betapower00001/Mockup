@@ -14,6 +14,7 @@ type Props = {
   initialColor: string;
   options: ColorOption[];
   onColorChange: (color: string) => void;
+  allowCustom?: boolean;
 };
 
 /* =========================
@@ -52,7 +53,13 @@ function normalizeHex(input: string) {
    Component
 ========================= */
 
-export default function ColorPicker({ label, initialColor, options, onColorChange }: Props) {
+export default function ColorPicker({
+  label,
+  initialColor,
+  options,
+  onColorChange,
+  allowCustom = false,
+}: Props) {
   const normalizedOptions = useMemo(
     () =>
       options.map((o) => ({
@@ -65,25 +72,31 @@ export default function ColorPicker({ label, initialColor, options, onColorChang
   const fallbackColor = normalizedOptions[0]?.value ?? "#000000";
   const normalizedInitial = normalizeHex(initialColor);
 
-  const [value, setValue] = useState<string>(
-    normalizedOptions.some((o) => o.value === normalizedInitial) ? normalizedInitial : fallbackColor
-  );
+  const initialResolved =
+    allowCustom || normalizedOptions.some((o) => o.value === normalizedInitial)
+      ? normalizedInitial
+      : fallbackColor;
+
+  const [value, setValue] = useState<string>(initialResolved);
 
   useEffect(() => {
-    const next = normalizedOptions.some((o) => o.value === normalizedInitial) ? normalizedInitial : fallbackColor;
+    const next =
+      allowCustom || normalizedOptions.some((o) => o.value === normalizedInitial)
+        ? normalizedInitial
+        : fallbackColor;
     setValue(next);
-  }, [normalizedInitial, fallbackColor, normalizedOptions]);
+  }, [allowCustom, normalizedInitial, fallbackColor, normalizedOptions]);
 
   function commit(next: string) {
     const normalized = normalizeHex(next);
     const allowed = normalizedOptions.some((o) => o.value === normalized);
-    const finalColor = allowed ? normalized : fallbackColor;
+    const finalColor = allowCustom ? normalized : allowed ? normalized : fallbackColor;
     setValue(finalColor);
     onColorChange(finalColor);
   }
 
   const selectedLabel =
-    normalizedOptions.find((o) => o.value === value)?.label ?? value.toUpperCase();
+    normalizedOptions.find((o) => o.value === value)?.label ?? "สีอิสระ";
 
   /* =========================
      Styles
@@ -142,6 +155,33 @@ export default function ColorPicker({ label, initialColor, options, onColorChang
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))",
     gap: 8,
+  };
+
+  const customRowStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "10px 12px",
+    borderRadius: 14,
+    background: "#ffffff",
+    border: "1px solid rgba(148,163,184,.28)",
+    boxShadow: "0 8px 16px rgba(15,23,42,.05)",
+    width: "fit-content",
+  };
+
+  const customInputStyle: React.CSSProperties = {
+    width: 40,
+    height: 40,
+    padding: 0,
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+  };
+
+  const customTextStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#0f172a",
   };
 
   function getSwatchButtonStyle(active: boolean, color: string): React.CSSProperties {
@@ -204,6 +244,19 @@ export default function ColorPicker({ label, initialColor, options, onColorChang
             );
           })}
         </div>
+
+        {allowCustom && (
+          <div style={customRowStyle}>
+            <input
+              type="color"
+              value={value}
+              onChange={(e) => commit(e.target.value)}
+              style={customInputStyle}
+              title="เลือกสีอิสระ"
+            />
+            <span style={customTextStyle}>สีอิสระ: {value.toUpperCase()}</span>
+          </div>
+        )}
       </div>
     </div>
   );

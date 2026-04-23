@@ -37,6 +37,8 @@ export type LogoItem = {
   transform: LogoTransform;
 };
 
+type OrbitNudgeDirection = "left" | "right" | "up" | "down" | null;
+
 type Plug3DProps = {
   config: PlugModelConfig;
   logos?: LogoItem[];
@@ -55,6 +57,8 @@ type Plug3DProps = {
   renderMode?: boolean;
   view?: "front" | "angle";
   onRenderReady?: (render: PlugRenderFn) => void;
+  orbitNudgeDirection?: OrbitNudgeDirection;
+  orbitNudgeTick?: number;
 };
 
 // ----------------------------------------------------
@@ -1387,7 +1391,27 @@ function PlugScene({
     if (!targetMesh) return;
 
     let axes = (config.patternDecal?.uvProjection ?? config.decal.uvProjection ?? "XZ") as UVProjection;
-    const pan = patternTransform ?? { x: 0.5, y: 0.5, zoom: 1 };
+
+    const basePan = patternTransform ?? { x: 0.5, y: 0.5, zoom: 1 };
+    const pan =
+      config.id === "TYPE-3"
+        ? {
+          ...basePan,
+          y: Math.max(0, Math.min(1, basePan.y + 0.035)),
+        }
+        : config.id === "TYPE-5"
+          ? {
+            ...basePan,
+            y: Math.max(0, Math.min(1, basePan.y + 0.01)),
+          }
+          : config.id === "TYPE-2"
+            ? {
+              ...basePan,
+              ...basePan,
+              y: Math.max(0, Math.min(1, basePan.y + 0.20)),
+              zoom: Math.max(0.01, basePan.zoom * 1.50),
+            }
+            : basePan;
     const wantsWorldMain = config.patternDecal?.uvSpace === "world";
 
     const rot =
@@ -1806,6 +1830,8 @@ export default function Plug3D({
   renderMode = false,
   view = "angle",
   onRenderReady,
+  orbitNudgeDirection = null,
+  orbitNudgeTick = 0,
 }: Plug3DProps) {
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -1816,6 +1842,34 @@ export default function Plug3D({
 
   const cameraPos = useMemo(() => [0, 0.1, 3] as [number, number, number], []);
   const lockControls = dragLogoMode || dragPatternMode || renderMode;
+
+  useEffect(() => {
+    if (!orbitNudgeDirection || orbitNudgeTick === 0) return;
+
+    const controls = controlsRef.current;
+    const camera = cameraRef.current;
+    if (!controls || !camera) return;
+
+    const target = controls.target as THREE.Vector3;
+    const offset = new THREE.Vector3().copy(camera.position).sub(target);
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+
+    const AZ_STEP = 0.22;
+    const POLAR_STEP = 0.16;
+    const MIN_POLAR = 0.35;
+    const MAX_POLAR = Math.PI - 0.35;
+
+    if (orbitNudgeDirection === "left") spherical.theta -= AZ_STEP;
+    if (orbitNudgeDirection === "right") spherical.theta += AZ_STEP;
+    if (orbitNudgeDirection === "up") spherical.phi = Math.max(MIN_POLAR, spherical.phi - POLAR_STEP);
+    if (orbitNudgeDirection === "down") spherical.phi = Math.min(MAX_POLAR, spherical.phi + POLAR_STEP);
+
+    offset.setFromSpherical(spherical);
+    camera.position.copy(target).add(offset);
+    camera.lookAt(target);
+    camera.updateProjectionMatrix();
+    controls.update();
+  }, [orbitNudgeDirection, orbitNudgeTick]);
 
   return (
     <Canvas
