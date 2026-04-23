@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import plugTypes from "../data/plugTypes";
-import { getPatternGroupsByType  } from "../data/patterns";
+import { getPatternGroupsByType } from "../data/patterns";
 import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName } from "./Plug3D";
 import ColorPicker from "./ColorPicker";
 import PlugSelector from "./PlugSelector";
@@ -137,10 +137,10 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
   "TYPE-2": {
     top: [
       { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ครีม", value: "#f3ead8" },
-      { label: "เบจ", value: "#d6c2a1" },
-      { label: "น้ำเงิน", value: "#1d4ed8" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
     ],
     bottom: [
       { label: "ขาว", value: "#ffffff" },
@@ -188,6 +188,36 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     top: TYPE4_COLORS,
     bottom: TYPE4_COLORS,
   },
+
+  "TYPE-5": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
+    ],
+    switch: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+    ],
+  },
+
 };
 
 function getColorOptionsByType(typeId: string): ColorOptionsByPart {
@@ -543,6 +573,8 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [orbitNudgeTick, setOrbitNudgeTick] = useState(0);
   const [orbitNudgeDirection, setOrbitNudgeDirection] = useState<OrbitNudgeDirection | null>(null);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [viewPreviewMap, setViewPreviewMap] = useState<Partial<Record<RenderViewName, string>>>({});
+  const [viewPreviewLoading, setViewPreviewLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -659,7 +691,7 @@ export default function PlugCustomizer({ plugId }: Props) {
   function handleLogoSelect(id: string, url: string) {
     setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, url } : l)));
     setActiveLogoId(id);
-    setStep("logo");
+    // ไม่เด้งไปขั้นตอนโลโก้อัตโนมัติ ให้ลูกค้ากดถัดไปเอง
   }
 
   function handleLogoRemove(id: string) {
@@ -889,6 +921,64 @@ export default function PlugCustomizer({ plugId }: Props) {
     link.click();
   }
 
+  async function buildInlinePreview(view: RenderViewName) {
+    const render = renderRef.current;
+    if (!render) return null;
+
+    const src = await render({
+      transparent: false,
+      view,
+      download: false,
+      filename: `plug-${selectedPlugId}-${view}-preview.png`,
+    });
+
+    if (!src) return null;
+    return view === "top" ? await rotateImage180DataUrl(src) : src;
+  }
+
+  async function refreshInlinePreviews() {
+    const render = renderRef.current;
+    if (!render) return;
+
+    setViewPreviewLoading(true);
+
+    try {
+      const pairs = await Promise.all(
+        A4_VIEWS.map(async (item) => [item.key, await buildInlinePreview(item.key)] as const)
+      );
+
+      const next: Partial<Record<RenderViewName, string>> = {};
+      for (const [key, src] of pairs) {
+        if (src) next[key] = src;
+      }
+      setViewPreviewMap(next);
+    } finally {
+      setViewPreviewLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (step !== "view") return;
+
+    const timer = window.setTimeout(() => {
+      void refreshInlinePreviews();
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    step,
+    selectedPlugId,
+    customization.patternUrl,
+    customization.topColor,
+    customization.bottomColor,
+    customization.switchColor,
+    patternTransform.x,
+    patternTransform.y,
+    patternTransform.zoom,
+    patternRotation,
+    logos,
+  ]);
+
   async function downloadProductionSampleTop() {
     const render = renderRef.current;
     if (!render) return;
@@ -976,13 +1066,12 @@ export default function PlugCustomizer({ plugId }: Props) {
     const finalCtx = finalCanvas.getContext("2d");
     if (!finalCtx) return;
 
-    finalCtx.fillStyle = "#ffffff";
-    finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+    finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
     finalCtx.drawImage(artworkCanvas, 0, 0);
 
     const link = document.createElement("a");
     link.href = finalCanvas.toDataURL("image/png");
-    link.download = `plug-${selectedPlugId}-production-artwork-2d.png`;
+    link.download = `plug-${selectedPlugId}-production-artwork-transparent.png`;
     link.click();
   }
 
@@ -992,7 +1081,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
     setDragPatternMode(false);
-    setStep("pattern");
+    // ไม่เด้งไปขั้นตอนลายอัตโนมัติ ให้ลูกค้ากดถัดไปเอง
   }
 
   function nudgePattern(dx: number, dy: number) {
@@ -1037,7 +1126,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     setDragLogoMode(false);
     setDragPatternMode(false);
     setUploadedPatterns([]);
-    setStep("color");
+    // ไม่เด้งไปขั้นตอนอื่นอัตโนมัติ ให้ลูกค้ากดถัดไปเอง
   }
 
   function goNext() {
@@ -1449,6 +1538,89 @@ export default function PlugCustomizer({ plugId }: Props) {
           <button type="button" className="btn btnDanger" onClick={resetAll}>
             รีเซ็ตทั้งหมด
           </button>
+        </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            border: "1px solid #e5e7eb",
+            borderRadius: 14,
+            background: "#f8fafc",
+            padding: 12,
+          }}
+        >
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div>
+              <div className="label">ตัวอย่างมุมต่าง ๆ</div>
+              <div className="hint">โชว์ภาพในพื้นที่ด้านล่างก่อนดาวน์โหลด</div>
+            </div>
+            <button type="button" className="btn btnGhost" onClick={() => void refreshInlinePreviews()} disabled={viewPreviewLoading}>
+              {viewPreviewLoading ? "กำลังสร้าง..." : "รีเฟรชตัวอย่าง"}
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {A4_VIEWS.map((item) => {
+              const src = viewPreviewMap[item.key];
+              return (
+                <div
+                  key={item.key}
+                  style={{
+                    border: "1px solid #dbe3ee",
+                    borderRadius: 12,
+                    background: "#ffffff",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "8px 10px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "#334155",
+                      borderBottom: "1px solid #eef2f7",
+                    }}
+                  >
+                    {item.label}
+                  </div>
+
+                  <div
+                    style={{
+                      aspectRatio: "1 / 1",
+                      background: "#f8fafc",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 8,
+                    }}
+                  >
+                    {src ? (
+                      <img
+                        src={src}
+                        alt={item.label}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "contain",
+                          display: "block",
+                        }}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 12, color: "#94a3b8", textAlign: "center", lineHeight: 1.5 }}>
+                        {viewPreviewLoading ? "กำลังสร้างภาพตัวอย่าง..." : "ยังไม่มีภาพตัวอย่าง"}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
