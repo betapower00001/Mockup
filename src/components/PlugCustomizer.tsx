@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import plugTypes from "../data/plugTypes";
-import { getPatternGroupsByType } from "../data/patterns";
+import { getPatternGroupsByType  } from "../data/patterns";
 import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName } from "./Plug3D";
 import ColorPicker from "./ColorPicker";
 import PlugSelector from "./PlugSelector";
@@ -137,10 +137,10 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
   "TYPE-2": {
     top: [
       { label: "ขาว", value: "#ffffff" },
-      { label: "กรมท่า", value: "#1e266a" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ครีม", value: "#f3ead8" },
+      { label: "เบจ", value: "#d6c2a1" },
+      { label: "น้ำเงิน", value: "#1d4ed8" },
     ],
     bottom: [
       { label: "ขาว", value: "#ffffff" },
@@ -188,36 +188,6 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     top: TYPE4_COLORS,
     bottom: TYPE4_COLORS,
   },
-
-  "TYPE-5": {
-    top: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "กรมท่า", value: "#1e266a" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-    ],
-    bottom: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ส้ม", value: "#ec3b27" },
-      { label: "แดง", value: "#ff000b" },
-      { label: "กรมท่า", value: "#1e266a" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-      { label: "ชมพู", value: "#f37c8f" },
-      { label: "ม่วงพาสเทล", value: "#9363a1" },
-    ],
-    switch: [
-      { label: "ขาว", value: "#ffffff" },
-      { label: "กรมท่า", value: "#1e266a" },
-      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
-      { label: "เขียวพาสเทล", value: "#62c2a6" },
-      { label: "เหลือง", value: "#ffc813" },
-    ],
-  },
-
 };
 
 function getColorOptionsByType(typeId: string): ColorOptionsByPart {
@@ -987,7 +957,6 @@ export default function PlugCustomizer({ plugId }: Props) {
       transparent: true,
       view: "top",
       download: false,
-      productionArtwork: true,
       filename: `plug-${selectedPlugId}-production-shape-mask.png`,
     });
 

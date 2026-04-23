@@ -47,7 +47,7 @@ const patternGroups: Record<string, PatternGroup[]> = {
     },
     {
       id: "special-2",
-      label: "ขนส่งยานยนต์",
+      label: "ยานยนต์",
       items: [
         {
           id: "t1-test3",
@@ -71,7 +71,7 @@ const patternGroups: Record<string, PatternGroup[]> = {
     },
         {
       id: "special-4",
-      label: "Thai seasonal",
+      label: "Seasonal",
       items: [
         {
           id: "t1-test3",
