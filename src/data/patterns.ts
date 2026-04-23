@@ -17,7 +17,7 @@ const patternGroups: Record<string, PatternGroup[]> = {
   "TYPE-1": [
     {
       id: "basic",
-      label: "ลายพื้นฐาน",
+      label: "การเมือง",
       items: [
         {
           id: "t1-test1",
@@ -35,7 +35,43 @@ const patternGroups: Record<string, PatternGroup[]> = {
     },
     {
       id: "special",
-      label: "ลายพิเศษ",
+      label: "การศึกษา",
+      items: [
+        {
+          id: "t1-test3",
+          name: "TYPE-1 Test 3",
+          preview: "/patterns/TYPE-1/test3.png",
+          img: "/patterns/TYPE-1/test3.png",
+        },
+      ],
+    },
+    {
+      id: "special-2",
+      label: "ขนส่งยานยนต์",
+      items: [
+        {
+          id: "t1-test3",
+          name: "TYPE-1 Test 3",
+          preview: "/patterns/TYPE-1/test3.png",
+          img: "/patterns/TYPE-1/test3.png",
+        },
+      ],
+    },
+        {
+      id: "special-3",
+      label: "แฟชั่น",
+      items: [
+        {
+          id: "t1-test3",
+          name: "TYPE-1 Test 3",
+          preview: "/patterns/TYPE-1/test3.png",
+          img: "/patterns/TYPE-1/test3.png",
+        },
+      ],
+    },
+        {
+      id: "special-4",
+      label: "Thai seasonal",
       items: [
         {
           id: "t1-test3",
