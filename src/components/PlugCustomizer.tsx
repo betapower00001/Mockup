@@ -281,6 +281,214 @@ function cropTransparentBounds(img: HTMLImageElement, alphaThreshold = 8) {
   };
 }
 
+
+type ProductionMaskResult = {
+  maskCanvas: HTMLCanvasElement;
+  bbox: { x: number; y: number; width: number; height: number };
+};
+
+function buildProductionEnvelopeMask(img: HTMLImageElement, alphaThreshold = 8): ProductionMaskResult | null {
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = img.naturalWidth || img.width;
+  sourceCanvas.height = img.naturalHeight || img.height;
+
+  const sourceCtx = sourceCanvas.getContext("2d");
+  if (!sourceCtx) return null;
+
+  sourceCtx.drawImage(img, 0, 0);
+  const { width, height } = sourceCanvas;
+  const imageData = sourceCtx.getImageData(0, 0, width, height);
+  const rgba = imageData.data;
+
+  const rowFill = new Uint8Array(width * height);
+  const colFill = new Uint8Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    let minX = -1;
+    let maxX = -1;
+    for (let x = 0; x < width; x++) {
+      const alpha = rgba[(y * width + x) * 4 + 3];
+      if (alpha > alphaThreshold) {
+        if (minX < 0) minX = x;
+        maxX = x;
+      }
+    }
+    if (minX >= 0 && maxX >= minX) {
+      for (let x = minX; x <= maxX; x++) {
+        rowFill[y * width + x] = 1;
+      }
+    }
+  }
+
+  for (let x = 0; x < width; x++) {
+    let minY = -1;
+    let maxY = -1;
+    for (let y = 0; y < height; y++) {
+      const alpha = rgba[(y * width + x) * 4 + 3];
+      if (alpha > alphaThreshold) {
+        if (minY < 0) minY = y;
+        maxY = y;
+      }
+    }
+    if (minY >= 0 && maxY >= minY) {
+      for (let y = minY; y <= maxY; y++) {
+        colFill[y * width + x] = 1;
+      }
+    }
+  }
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskCtx = maskCanvas.getContext("2d");
+  if (!maskCtx) return null;
+
+  const maskImage = maskCtx.createImageData(width, height);
+  let hasPixels = false;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const solid = rowFill[idx] && colFill[idx];
+      if (!solid) continue;
+
+      hasPixels = true;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+
+      const di = idx * 4;
+      maskImage.data[di] = 255;
+      maskImage.data[di + 1] = 255;
+      maskImage.data[di + 2] = 255;
+      maskImage.data[di + 3] = 255;
+    }
+  }
+
+  if (!hasPixels) return null;
+
+  maskCtx.putImageData(maskImage, 0, 0);
+
+  return {
+    maskCanvas,
+    bbox: {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    },
+  };
+}
+
+function rotateCanvas180(source: HTMLCanvasElement) {
+  const canvas = document.createElement("canvas");
+  canvas.width = source.width;
+  canvas.height = source.height;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(Math.PI);
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  return canvas;
+}
+
+async function drawProductionPattern(args: {
+  ctx: CanvasRenderingContext2D;
+  patternSrc?: string;
+  fillColor: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  transform: PatternTransform;
+  rotation: number;
+}) {
+  const { ctx, patternSrc, fillColor, x, y, width, height, transform, rotation } = args;
+
+  ctx.save();
+  ctx.fillStyle = fillColor;
+  ctx.fillRect(x, y, width, height);
+  ctx.restore();
+
+  if (!patternSrc || !patternSrc.trim()) return;
+
+  const img = await loadImage(patternSrc);
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+
+  const zoom = Math.max(0.01, transform.zoom || 1);
+  const coverScale = Math.max(width / iw, height / ih) / zoom;
+  const offsetX = (0.5 - transform.x) * width;
+  const offsetY = (0.5 - transform.y) * height;
+  const repeat = ctx.createPattern(img, "repeat");
+  if (!repeat) return;
+
+  ctx.save();
+  ctx.translate(x + width / 2 + offsetX, y + height / 2 + offsetY);
+  ctx.rotate(rotation || 0);
+  ctx.scale(coverScale, coverScale);
+  ctx.translate(-iw / 2, -ih / 2);
+  ctx.fillStyle = repeat;
+
+  const spanW = Math.max(iw * 8, width / Math.max(coverScale, 0.001) + iw * 6);
+  const spanH = Math.max(ih * 8, height / Math.max(coverScale, 0.001) + ih * 6);
+  ctx.fillRect(-spanW, -spanH, spanW * 2, spanH * 2);
+  ctx.restore();
+}
+
+async function drawProductionLogos(args: {
+  ctx: CanvasRenderingContext2D;
+  logos: LogoItem[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isFixedLogoType: boolean;
+}) {
+  const { ctx, logos, x, y, width, height, isFixedLogoType } = args;
+
+  const visibleLogos = logos.filter((logo) => !!logo.url && logo.url.trim() !== "");
+  for (const logo of visibleLogos) {
+    const img = await loadImage(logo.url);
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) continue;
+
+    const scale = Math.max(0.05, Number(logo.transform?.scale ?? 0.25));
+    const baseSize = Math.min(width, height) * scale * 1.25;
+
+    let drawW = baseSize;
+    let drawH = baseSize;
+    if (iw >= ih) {
+      drawH = baseSize * (ih / iw);
+    } else {
+      drawW = baseSize * (iw / ih);
+    }
+
+    const px = Number(logo.transform?.x ?? 0);
+    const py = Number(logo.transform?.y ?? 0);
+    const rot = Number(logo.transform?.rot ?? 0);
+
+    const centerX = x + width / 2 + px * width;
+    const centerY = y + height / 2 + (isFixedLogoType ? py * height : -py * height);
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(rot);
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
+  }
+}
+
 function ensureAllowedColor(color: string, options: { label: string; value: string }[]) {
   const normalized = normalizeHex(color) ?? "";
   if (normalized.startsWith("#")) return normalized;
@@ -682,7 +890,100 @@ export default function PlugCustomizer({ plugId }: Props) {
   }
 
   async function downloadProductionSampleTop() {
-    await downloadViewImage("top", `plug-${selectedPlugId}-production-sample-top-flipped.png`);
+    const render = renderRef.current;
+    if (!render) return;
+
+    const rawSrc = await render({
+      transparent: true,
+      view: "top",
+      download: false,
+      productionArtwork: true,
+      filename: `plug-${selectedPlugId}-production-shape-mask.png`,
+    });
+
+    if (!rawSrc) return;
+
+    const maskSourceImg = await loadImage(rawSrc);
+    const maskInfo = buildProductionEnvelopeMask(maskSourceImg);
+    if (!maskInfo) return;
+
+    const { bbox, maskCanvas } = maskInfo;
+    const pad = 60;
+    const artworkCanvas = document.createElement("canvas");
+    artworkCanvas.width = bbox.width + pad * 2;
+    artworkCanvas.height = bbox.height + pad * 2;
+
+    const artworkCtx = artworkCanvas.getContext("2d");
+    if (!artworkCtx) return;
+
+    const areaX = pad;
+    const areaY = pad;
+    const areaW = bbox.width;
+    const areaH = bbox.height;
+    const fillColor = safeColors.top ?? customization.topColor ?? "#ffffff";
+
+    await drawProductionPattern({
+      ctx: artworkCtx,
+      patternSrc: customization.patternUrl,
+      fillColor,
+      x: areaX,
+      y: areaY,
+      width: areaW,
+      height: areaH,
+      transform: patternTransform,
+      rotation: patternRotation,
+    });
+
+    await drawProductionLogos({
+      ctx: artworkCtx,
+      logos,
+      x: areaX,
+      y: areaY,
+      width: areaW,
+      height: areaH,
+      isFixedLogoType:
+        selectedPlugId === "TYPE-3" ||
+        selectedPlugId === "TYPE-4" ||
+        selectedPlugId === "TYPE-5",
+    });
+
+    const localMaskCanvas = document.createElement("canvas");
+    localMaskCanvas.width = artworkCanvas.width;
+    localMaskCanvas.height = artworkCanvas.height;
+    const localMaskCtx = localMaskCanvas.getContext("2d");
+    if (!localMaskCtx) return;
+
+    localMaskCtx.drawImage(
+      maskCanvas,
+      bbox.x,
+      bbox.y,
+      bbox.width,
+      bbox.height,
+      areaX,
+      areaY,
+      areaW,
+      areaH
+    );
+
+    artworkCtx.globalCompositeOperation = "destination-in";
+    artworkCtx.drawImage(localMaskCanvas, 0, 0);
+    artworkCtx.globalCompositeOperation = "source-over";
+
+    const finalCanvas = document.createElement("canvas");
+    finalCanvas.width = artworkCanvas.width;
+    finalCanvas.height = artworkCanvas.height;
+
+    const finalCtx = finalCanvas.getContext("2d");
+    if (!finalCtx) return;
+
+    finalCtx.fillStyle = "#ffffff";
+    finalCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+    finalCtx.drawImage(artworkCanvas, 0, 0);
+
+    const link = document.createElement("a");
+    link.href = finalCanvas.toDataURL("image/png");
+    link.download = `plug-${selectedPlugId}-production-artwork-2d.png`;
+    link.click();
   }
 
   function handlePatternUpload(base64: string) {

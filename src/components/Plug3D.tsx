@@ -21,6 +21,7 @@ export type PlugRenderOptions = {
   filename?: string;
   view?: RenderViewName;
   download?: boolean;
+  productionArtwork?: boolean;
 };
 
 export type PlugRenderFn = (opts?: PlugRenderOptions) => Promise<string | null>;
@@ -256,6 +257,45 @@ function applyCameraPose(camera: THREE.PerspectiveCamera, pose: CameraPose) {
   camera.position.copy(pose.position);
   camera.lookAt(pose.target);
   camera.updateProjectionMatrix();
+}
+
+function normalizeTargetNames(names?: string[]) {
+  return new Set((names ?? []).map((name) => String(name || "").trim()).filter(Boolean));
+}
+
+function meshMatchesTargetNames(mesh: THREE.Mesh, targets: Set<string>) {
+  const meshName = String(mesh.name || "").trim();
+  if (meshName && targets.has(meshName)) return true;
+
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  return mats.some((mat: any) => {
+    const matName = String(mat?.name || "").trim();
+    return !!matName && targets.has(matName);
+  });
+}
+
+function withProductionArtworkVisibility(scene: THREE.Object3D, config: PlugModelConfig) {
+  const keepTargets = normalizeTargetNames(config.colorTargets.top);
+  const keepMeshNames = normalizeTargetNames([
+    config.decal.meshName,
+    config.patternDecal?.meshName,
+    config.patternSideDecal?.meshName,
+  ].filter(Boolean) as string[]);
+
+  const saved: Array<{ mesh: THREE.Mesh; visible: boolean }> = [];
+
+  scene.traverse((obj: any) => {
+    if (!obj?.isMesh) return;
+    const mesh = obj as THREE.Mesh;
+    saved.push({ mesh, visible: mesh.visible });
+
+    const shouldKeep = meshMatchesTargetNames(mesh, keepTargets) || meshMatchesTargetNames(mesh, keepMeshNames);
+    mesh.visible = shouldKeep;
+  });
+
+  return () => {
+    for (const item of saved) item.mesh.visible = item.visible;
+  };
 }
 
 function waitNextFrame() {
@@ -1613,6 +1653,7 @@ function PlugScene({
       const transparent = opts?.transparent ?? false;
       const filename = opts?.filename ?? "render.png";
       const shouldDownload = opts?.download ?? true;
+      const productionArtwork = opts?.productionArtwork ?? false;
 
       const exportWidth = shouldDownload ? 2200 : 1800;
       const exportHeight = shouldDownload ? 2200 : 1800;
@@ -1629,27 +1670,35 @@ function PlugScene({
       exportCamera.updateMatrixWorld(true);
       await waitNextFrame();
 
-      const dataURL = renderSceneToDataURL({
-        gl,
-        scene: rootScene,
-        camera: exportCamera,
-        width: exportWidth,
-        height: exportHeight,
-        transparent,
-      });
+      const restoreVisibility = productionArtwork
+        ? withProductionArtworkVisibility(scene, config)
+        : null;
 
-      if (!dataURL) return null;
+      try {
+        const dataURL = renderSceneToDataURL({
+          gl,
+          scene: rootScene,
+          camera: exportCamera,
+          width: exportWidth,
+          height: exportHeight,
+          transparent,
+        });
 
-      if (shouldDownload) {
-        const a = document.createElement("a");
-        a.href = dataURL;
-        a.download = filename;
-        a.click();
+        if (!dataURL) return null;
+
+        if (shouldDownload) {
+          const a = document.createElement("a");
+          a.href = dataURL;
+          a.download = filename;
+          a.click();
+        }
+
+        return dataURL;
+      } finally {
+        restoreVisibility?.();
       }
-
-      return dataURL;
     });
-  }, [onRenderReady, glRef, cameraRef, scene, rootScene]);
+  }, [onRenderReady, glRef, cameraRef, scene, rootScene, config]);
 
   const draggingRef = useRef(false);
   const draggingPatternRef = useRef(false);
