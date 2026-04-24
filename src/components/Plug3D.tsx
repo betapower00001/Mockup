@@ -275,12 +275,28 @@ function meshMatchesTargetNames(mesh: THREE.Mesh, targets: Set<string>) {
 }
 
 function withProductionArtworkVisibility(scene: THREE.Object3D, config: PlugModelConfig) {
-  const keepTargets = normalizeTargetNames(config.colorTargets.top);
-  const keepMeshNames = normalizeTargetNames([
-    config.decal.meshName,
-    config.patternDecal?.meshName,
-    config.patternSideDecal?.meshName,
-  ].filter(Boolean) as string[]);
+  const strictFrontOnly = config.id === "TYPE-3" || config.id === "TYPE-5";
+
+  const keepTargets = strictFrontOnly
+    ? new Set<string>()
+    : normalizeTargetNames(config.colorTargets.top);
+
+  const keepMeshNames = normalizeTargetNames(
+    (
+      strictFrontOnly
+        ? [
+            config.decal.meshName,
+            config.patternDecal?.meshName,
+            config.patternWorldRefMesh,
+            ...(config.patternWorldBBoxMeshes ?? []),
+          ]
+        : [
+            config.decal.meshName,
+            config.patternDecal?.meshName,
+            config.patternSideDecal?.meshName,
+          ]
+    ).filter(Boolean) as string[]
+  );
 
   const saved: Array<{ mesh: THREE.Mesh; visible: boolean }> = [];
 

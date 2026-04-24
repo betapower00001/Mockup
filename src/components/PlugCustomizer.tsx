@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import plugTypes from "../data/plugTypes";
-import { getPatternGroupsByType  } from "../data/patterns";
+import { getPatternGroupsByType } from "../data/patterns";
 import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName } from "./Plug3D";
 import ColorPicker from "./ColorPicker";
 import PlugSelector from "./PlugSelector";
@@ -137,10 +137,10 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
   "TYPE-2": {
     top: [
       { label: "ขาว", value: "#ffffff" },
-      { label: "ดำ", value: "#111111" },
-      { label: "ครีม", value: "#f3ead8" },
-      { label: "เบจ", value: "#d6c2a1" },
-      { label: "น้ำเงิน", value: "#1d4ed8" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
     ],
     bottom: [
       { label: "ขาว", value: "#ffffff" },
@@ -188,7 +188,39 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     top: TYPE4_COLORS,
     bottom: TYPE4_COLORS,
   },
+
+    "TYPE-5": {
+    top: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+    ],
+    bottom: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
+    ],
+    switch: [
+      { label: "ขาว", value: "#ffffff" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+    ],
+  },
+
 };
+
+
 
 function getColorOptionsByType(typeId: string): ColorOptionsByPart {
   return (
@@ -286,6 +318,473 @@ type ProductionMaskResult = {
   maskCanvas: HTMLCanvasElement;
   bbox: { x: number; y: number; width: number; height: number };
 };
+
+function drawRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function cropCanvasAlphaBounds(source: HTMLCanvasElement, alphaThreshold = 8, pad = 0) {
+  const width = source.width;
+  const height = source.height;
+  const ctx = source.getContext("2d");
+  if (!ctx) {
+    return { canvas: source, x: 0, y: 0, width, height };
+  }
+
+  const data = ctx.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] > alphaThreshold) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) {
+    return { canvas: source, x: 0, y: 0, width, height };
+  }
+
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(width - 1, maxX + pad);
+  maxY = Math.min(height - 1, maxY + pad);
+
+  const out = document.createElement("canvas");
+  out.width = maxX - minX + 1;
+  out.height = maxY - minY + 1;
+  const outCtx = out.getContext("2d");
+  if (!outCtx) {
+    return { canvas: source, x: 0, y: 0, width, height };
+  }
+  outCtx.drawImage(source, minX, minY, out.width, out.height, 0, 0, out.width, out.height);
+
+  return { canvas: out, x: minX, y: minY, width: out.width, height: out.height };
+}
+
+function computeCanvasPrincipalAxisAngle(source: HTMLCanvasElement, alphaThreshold = 8) {
+  const width = source.width;
+  const height = source.height;
+  const ctx = source.getContext("2d");
+  if (!ctx) return null;
+
+  const data = ctx.getImageData(0, 0, width, height).data;
+  let count = 0;
+  let sumX = 0;
+  let sumY = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] <= alphaThreshold) continue;
+      count += 1;
+      sumX += x;
+      sumY += y;
+    }
+  }
+
+  if (!count) return null;
+
+  const meanX = sumX / count;
+  const meanY = sumY / count;
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] <= alphaThreshold) continue;
+      const dx = x - meanX;
+      const dy = y - meanY;
+      sxx += dx * dx;
+      syy += dy * dy;
+      sxy += dx * dy;
+    }
+  }
+
+  if (sxx === 0 && syy === 0) return null;
+  return 0.5 * Math.atan2(2 * sxy, sxx - syy);
+}
+
+function rotateCanvasByAngle(source: HTMLCanvasElement, angleRad: number) {
+  const width = source.width;
+  const height = source.height;
+  const cos = Math.abs(Math.cos(angleRad));
+  const sin = Math.abs(Math.sin(angleRad));
+  const outW = Math.max(1, Math.ceil(width * cos + height * sin));
+  const outH = Math.max(1, Math.ceil(width * sin + height * cos));
+
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = outH;
+  const ctx = out.getContext("2d");
+  if (!ctx) return source;
+
+  ctx.clearRect(0, 0, outW, outH);
+  ctx.translate(outW / 2, outH / 2);
+  ctx.rotate(angleRad);
+  ctx.drawImage(source, -width / 2, -height / 2);
+  return out;
+}
+
+function straightenType2ProductionCanvas(source: HTMLCanvasElement) {
+  const angle = computeCanvasPrincipalAxisAngle(source);
+  if (angle == null) return source;
+
+  let rotateBy = Math.PI / 2 - angle;
+  while (rotateBy > Math.PI / 2) rotateBy -= Math.PI;
+  while (rotateBy < -Math.PI / 2) rotateBy += Math.PI;
+
+  const rotated = rotateCanvasByAngle(source, rotateBy);
+  return cropCanvasAlphaBounds(rotated, 8, 0).canvas;
+}
+
+function buildManualType5Mask(img: HTMLImageElement): ProductionMaskResult | null {
+  const cropped = cropTransparentBounds(img, 8);
+  const width = cropped.width;
+  const height = cropped.height;
+  if (!width || !height) return null;
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const ctx = maskCanvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+
+  // TYPE-5 ใช้ manual mask คงที่ เพื่อกันรอยแหว่งจากสวิตช์/ปุ่มด้านข้าง
+  const outerX = Math.round(width * 0.03);
+  const outerY = Math.round(height * 0.025);
+  const outerW = Math.round(width * 0.94);
+  const outerH = Math.round(height * 0.95);
+  const radius = Math.round(Math.min(outerW * 0.16, outerH * 0.08));
+
+  drawRoundedRectPath(ctx, outerX, outerY, outerW, outerH, radius);
+  ctx.fill();
+
+  return {
+    maskCanvas,
+    bbox: {
+      x: outerX,
+      y: outerY,
+      width: outerW,
+      height: outerH,
+    },
+  };
+}
+
+function buildManualType2Mask(img: HTMLImageElement): ProductionMaskResult | null {
+  const cropped = cropTransparentBounds(img, 8);
+  const width = cropped.width;
+  const height = cropped.height;
+  if (!width || !height) return null;
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const ctx = maskCanvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#ffffff";
+
+  // TYPE-2 ใช้ manual template แบบแคบและสูง
+  // เพื่อให้ framing ของลายใกล้กับหน้าปลั๊กใน mockup มากขึ้น
+  const outerW = Math.round(width * 0.36);
+  const outerH = Math.round(height * 0.965);
+  const outerX = Math.round((width - outerW) / 2);
+  const outerY = Math.round(height * 0.018);
+  const radius = Math.round(Math.min(outerW * 0.22, outerH * 0.055));
+
+  drawRoundedRectPath(ctx, outerX, outerY, outerW, outerH, radius);
+  ctx.fill();
+
+  return {
+    maskCanvas,
+    bbox: {
+      x: outerX,
+      y: outerY,
+      width: outerW,
+      height: outerH,
+    },
+  };
+}
+
+function percentile(values: number[], p: number) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p)));
+  return sorted[idx] ?? sorted[0] ?? 0;
+}
+
+function fillType5SwitchNotch(maskInfo: ProductionMaskResult): ProductionMaskResult {
+  const { maskCanvas } = maskInfo;
+  const width = maskCanvas.width;
+  const height = maskCanvas.height;
+  const ctx = maskCanvas.getContext("2d");
+  if (!ctx) return maskInfo;
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  const rowLeft = new Array<number>(height).fill(-1);
+  const rowRight = new Array<number>(height).fill(-1);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const a = data[(y * width + x) * 4 + 3];
+      if (a <= 0) continue;
+      if (rowLeft[y] < 0) rowLeft[y] = x;
+      rowRight[y] = x;
+    }
+  }
+
+  const bodyStart = Math.floor(height * 0.18);
+  const bodyEnd = Math.ceil(height * 0.90);
+  const bodyLefts = rowLeft.slice(bodyStart, bodyEnd + 1).filter(v => v >= 0);
+  if (!bodyLefts.length) return maskInfo;
+
+  // ใช้ค่า low percentile ของด้านซ้ายเป็นเส้นฐานของขอบหลัก
+  const baseLeft = Math.round(percentile(bodyLefts, 0.18));
+  const fixedLeft = [...rowLeft];
+
+  // เก็บเฉพาะช่วงเว้าที่ลึกกว่าปกติ แล้วเติมกลับให้เต็ม
+  for (let y = bodyStart; y <= bodyEnd; y++) {
+    if (rowLeft[y] < 0 || rowRight[y] < 0) continue;
+
+    const winVals: number[] = [];
+    for (let yy = Math.max(bodyStart, y - 18); yy <= Math.min(bodyEnd, y + 18); yy++) {
+      if (rowLeft[yy] >= 0) winVals.push(rowLeft[yy]);
+    }
+    const localBase = winVals.length ? Math.round(percentile(winVals, 0.2)) : baseLeft;
+    const targetLeft = Math.min(baseLeft, localBase);
+
+    // ถ้าแถวนี้เว้าเข้าไปด้านขวาชัดเจน ให้ดันกลับมาที่เส้นฐาน
+    if (rowLeft[y] - targetLeft >= 4) {
+      fixedLeft[y] = targetLeft;
+    }
+  }
+
+  const outCanvas = document.createElement("canvas");
+  outCanvas.width = width;
+  outCanvas.height = height;
+  const outCtx = outCanvas.getContext("2d");
+  if (!outCtx) return maskInfo;
+  const out = outCtx.createImageData(width, height);
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  let hasPixel = false;
+
+  for (let y = 0; y < height; y++) {
+    if (fixedLeft[y] < 0 || rowRight[y] < 0) continue;
+    const left = Math.max(0, Math.min(width - 1, fixedLeft[y]));
+    const right = Math.max(0, Math.min(width - 1, rowRight[y]));
+    for (let x = left; x <= right; x++) {
+      const i = (y * width + x) * 4;
+      out.data[i] = 255;
+      out.data[i + 1] = 255;
+      out.data[i + 2] = 255;
+      out.data[i + 3] = 255;
+      hasPixel = true;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (!hasPixel) return maskInfo;
+
+  outCtx.putImageData(out, 0, 0);
+  return {
+    maskCanvas: outCanvas,
+    bbox: {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    },
+  };
+}
+
+function median(values: number[]) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+}
+
+function normalizeProductionMaskEdges(
+  maskInfo: ProductionMaskResult,
+  options?: {
+    radius?: number;
+    threshold?: number;
+    maxRun?: number;
+    fixLeft?: boolean;
+    fixRight?: boolean;
+  }
+): ProductionMaskResult {
+  const { radius = 14, threshold = 6, maxRun = 36, fixLeft = true, fixRight = true } = options ?? {};
+  const { maskCanvas } = maskInfo;
+  const width = maskCanvas.width;
+  const height = maskCanvas.height;
+  const ctx = maskCanvas.getContext("2d");
+  if (!ctx) return maskInfo;
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  const rowLeft = new Array<number>(height).fill(-1);
+  const rowRight = new Array<number>(height).fill(-1);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const a = data[(y * width + x) * 4 + 3];
+      if (a <= 0) continue;
+      if (rowLeft[y] < 0) rowLeft[y] = x;
+      rowRight[y] = x;
+    }
+  }
+
+  const collect = (arr: number[], center: number) => {
+    const out: number[] = [];
+    for (let yy = Math.max(0, center - radius); yy <= Math.min(height - 1, center + radius); yy++) {
+      if (arr[yy] >= 0) out.push(arr[yy]);
+    }
+    return out;
+  };
+
+  const targetLeft = [...rowLeft];
+  const targetRight = [...rowRight];
+
+  for (let y = 0; y < height; y++) {
+    if (rowLeft[y] < 0 || rowRight[y] < 0) continue;
+    const leftNeighbors = collect(rowLeft, y);
+    const rightNeighbors = collect(rowRight, y);
+    if (fixLeft && leftNeighbors.length) targetLeft[y] = Math.round(median(leftNeighbors));
+    if (fixRight && rightNeighbors.length) targetRight[y] = Math.round(median(rightNeighbors));
+  }
+
+  const correctedLeft = [...rowLeft];
+  const correctedRight = [...rowRight];
+
+  const patchRuns = (side: 'left' | 'right') => {
+    const current = side === 'left' ? rowLeft : rowRight;
+    const target = side === 'left' ? targetLeft : targetRight;
+    let y = 0;
+
+    while (y < height) {
+      if (current[y] < 0 || target[y] < 0) {
+        y += 1;
+        continue;
+      }
+
+      const diff = side === 'left' ? current[y] - target[y] : target[y] - current[y];
+      if (diff <= threshold) {
+        y += 1;
+        continue;
+      }
+
+      const start = y;
+      let end = y;
+      while (end + 1 < height) {
+        if (current[end + 1] < 0 || target[end + 1] < 0) break;
+        const nextDiff = side === 'left' ? current[end + 1] - target[end + 1] : target[end + 1] - current[end + 1];
+        if (nextDiff <= threshold) break;
+        end += 1;
+      }
+
+      if (end - start + 1 <= maxRun) {
+        for (let yy = start; yy <= end; yy++) {
+          if (side === 'left') {
+            correctedLeft[yy] = Math.min(current[yy], target[yy]);
+          } else {
+            correctedRight[yy] = Math.max(current[yy], target[yy]);
+          }
+        }
+      }
+
+      y = end + 1;
+    }
+  };
+
+  if (fixLeft) patchRuns('left');
+  if (fixRight) patchRuns('right');
+
+  const outCanvas = document.createElement('canvas');
+  outCanvas.width = width;
+  outCanvas.height = height;
+  const outCtx = outCanvas.getContext('2d');
+  if (!outCtx) return maskInfo;
+  const outImage = outCtx.createImageData(width, height);
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  let hasPixels = false;
+
+  for (let y = 0; y < height; y++) {
+    if (correctedLeft[y] < 0 || correctedRight[y] < 0) continue;
+    const left = Math.max(0, Math.min(width - 1, correctedLeft[y]));
+    const right = Math.max(0, Math.min(width - 1, correctedRight[y]));
+    for (let x = left; x <= right; x++) {
+      const i = (y * width + x) * 4;
+      outImage.data[i] = 255;
+      outImage.data[i + 1] = 255;
+      outImage.data[i + 2] = 255;
+      outImage.data[i + 3] = 255;
+      hasPixels = true;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (!hasPixels) return maskInfo;
+
+  outCtx.putImageData(outImage, 0, 0);
+  return {
+    maskCanvas: outCanvas,
+    bbox: {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    },
+  };
+}
 
 function buildProductionEnvelopeMask(img: HTMLImageElement, alphaThreshold = 8): ProductionMaskResult | null {
   const sourceCanvas = document.createElement("canvas");
@@ -410,8 +909,9 @@ async function drawProductionPattern(args: {
   height: number;
   transform: PatternTransform;
   rotation: number;
+  offsetRotation?: number;
 }) {
-  const { ctx, patternSrc, fillColor, x, y, width, height, transform, rotation } = args;
+  const { ctx, patternSrc, fillColor, x, y, width, height, transform, rotation, offsetRotation = 0 } = args;
 
   ctx.save();
   ctx.fillStyle = fillColor;
@@ -427,8 +927,12 @@ async function drawProductionPattern(args: {
 
   const zoom = Math.max(0.01, transform.zoom || 1);
   const coverScale = Math.max(width / iw, height / ih) / zoom;
-  const offsetX = (0.5 - transform.x) * width;
-  const offsetY = (0.5 - transform.y) * height;
+  const rawOffsetX = (0.5 - transform.x) * width;
+  const rawOffsetY = (0.5 - transform.y) * height;
+  const cosOff = Math.cos(offsetRotation || 0);
+  const sinOff = Math.sin(offsetRotation || 0);
+  const offsetX = rawOffsetX * cosOff - rawOffsetY * sinOff;
+  const offsetY = rawOffsetX * sinOff + rawOffsetY * cosOff;
   const repeat = ctx.createPattern(img, "repeat");
   if (!repeat) return;
 
@@ -957,13 +1461,19 @@ export default function PlugCustomizer({ plugId }: Props) {
       transparent: true,
       view: "top",
       download: false,
+      productionArtwork: selectedPlugId === "TYPE-3" || selectedPlugId === "TYPE-5",
       filename: `plug-${selectedPlugId}-production-shape-mask.png`,
     });
 
     if (!rawSrc) return;
 
     const maskSourceImg = await loadImage(rawSrc);
-    const maskInfo = buildProductionEnvelopeMask(maskSourceImg);
+    const maskInfo =
+      selectedPlugId === "TYPE-5"
+        ? buildManualType5Mask(maskSourceImg)
+        : selectedPlugId === "TYPE-2"
+          ? buildManualType2Mask(maskSourceImg)
+          : buildProductionEnvelopeMask(maskSourceImg);
     if (!maskInfo) return;
 
     const { bbox, maskCanvas } = maskInfo;
@@ -981,6 +1491,18 @@ export default function PlugCustomizer({ plugId }: Props) {
     const areaH = bbox.height;
     const fillColor = safeColors.top ?? customization.topColor ?? "#ffffff";
 
+    const baseProductionRotation =
+      selectedPlugId === "TYPE-2"
+        ? (((plugConfig.patternDecal as any)?.patternRotation as number | undefined) ?? 0)
+        : 0;
+
+    // TYPE-2 แบบ manual template: ใช้ rotation จาก UI ตรง ๆ
+    // ไม่บวก base ของโมเดลซ้ำ เพราะทำให้ลายคลาดจาก mockup จริง
+    const productionPatternRotation =
+      selectedPlugId === "TYPE-2"
+        ? patternRotation
+        : patternRotation;
+
     await drawProductionPattern({
       ctx: artworkCtx,
       patternSrc: customization.patternUrl,
@@ -990,7 +1512,8 @@ export default function PlugCustomizer({ plugId }: Props) {
       width: areaW,
       height: areaH,
       transform: patternTransform,
-      rotation: patternRotation,
+      rotation: productionPatternRotation,
+      offsetRotation: 0,
     });
 
     await drawProductionLogos({
@@ -1038,8 +1561,10 @@ export default function PlugCustomizer({ plugId }: Props) {
     finalCtx.clearRect(0, 0, finalCanvas.width, finalCanvas.height);
     finalCtx.drawImage(artworkCanvas, 0, 0);
 
+    const exportCanvas = finalCanvas;
+
     const link = document.createElement("a");
-    link.href = finalCanvas.toDataURL("image/png");
+    link.href = exportCanvas.toDataURL("image/png");
     link.download = `plug-${selectedPlugId}-production-artwork-transparent.png`;
     link.click();
   }
