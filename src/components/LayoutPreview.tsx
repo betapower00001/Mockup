@@ -22,138 +22,135 @@ const EXTRA_VIEWS: { key: RenderViewName; label: string }[] = [
   { key: "top", label: "บน" },
 ];
 
+const btnBase: React.CSSProperties = {
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "1px solid #e5e7eb",
+  background: "#ffffff",
+  color: "#0f172a",
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: 13,
+};
+
 export default function LayoutPreview({
   view,
   onSetView,
   onDownload,
   onDownloadTop,
-  onDownloadProductionSample,
   onDownloadA4,
   onDownloadView,
 }: LayoutPreviewProps) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* เลือกมุมหลัก */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 8,
+        }}
+      >
         <button
+          type="button"
           onClick={() => onSetView("front")}
           style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #0b76d1",
-            background: view === "front" ? "#0b76d1" : "#ffffff",
-            color: view === "front" ? "#ffffff" : "#000000",
-            cursor: "pointer",
+            ...btnBase,
+            border: view === "front" ? "1px solid #2563eb" : btnBase.border,
+            background: view === "front" ? "#2563eb" : "#ffffff",
+            color: view === "front" ? "#ffffff" : "#0f172a",
           }}
         >
-          หน้า
+          มุมหน้า
         </button>
 
         <button
+          type="button"
           onClick={() => onSetView("angle")}
           style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #0b76d1",
-            background: view === "angle" ? "#0b76d1" : "#ffffff",
-            color: view === "angle" ? "#ffffff" : "#000000",
-            cursor: "pointer",
+            ...btnBase,
+            border: view === "angle" ? "1px solid #2563eb" : btnBase.border,
+            background: view === "angle" ? "#2563eb" : "#ffffff",
+            color: view === "angle" ? "#ffffff" : "#0f172a",
           }}
         >
           มุมเอียง
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {/* ปุ่มดาวน์โหลดหลัก */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 8,
+        }}
+      >
         <button
+          type="button"
           onClick={onDownload}
           style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #0b76d1",
-            background: "#0b76d1",
+            ...btnBase,
+            background: "#0f172a",
+            border: "1px solid #0f172a",
             color: "#ffffff",
-            cursor: "pointer",
           }}
         >
           ดาวน์โหลดภาพ
         </button>
 
         <button
-          onClick={onDownloadTop}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #7c3aed",
-            background: "#7c3aed",
-            color: "#ffffff",
-            cursor: "pointer",
-          }}
-        >
-          ดาวน์โหลดด้านบน
-        </button>
-
-        <button
-          onClick={onDownloadProductionSample}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #ea580c",
-            background: "#ea580c",
-            color: "#ffffff",
-            cursor: "pointer",
-          }}
-        >
-          ส่งตัวอย่างผลิต
-        </button>
-
-        <button
+          type="button"
           onClick={onDownloadA4}
           style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #16a34a",
+            ...btnBase,
             background: "#16a34a",
+            border: "1px solid #16a34a",
             color: "#ffffff",
-            cursor: "pointer",
           }}
         >
-          ดาวน์โหลด A4 (6 มุม)
+          ดาวน์โหลด A4
         </button>
       </div>
 
+      {/* ดาวน์โหลดแยกมุม */}
       <div
         style={{
           display: "flex",
           flexDirection: "column",
           gap: 8,
           padding: 10,
-          borderRadius: 10,
+          borderRadius: 14,
           border: "1px solid #e5e7eb",
-          background: "#f8fafc",
+          background: "rgba(255,255,255,.72)",
         }}
       >
         <div
           style={{
             fontSize: 13,
-            fontWeight: 600,
+            fontWeight: 800,
             color: "#334155",
           }}
         >
           ดาวน์โหลดแยกแต่ละมุม
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 8,
+          }}
+        >
           {EXTRA_VIEWS.map((item) => (
             <button
               key={item.key}
+              type="button"
               onClick={() => onDownloadView(item.key)}
               style={{
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: "1px solid #cbd5e1",
-                background: "#ffffff",
-                color: "#0f172a",
-                cursor: "pointer",
+                ...btnBase,
+                padding: "9px 10px",
+                fontSize: 12,
               }}
             >
               {item.label}

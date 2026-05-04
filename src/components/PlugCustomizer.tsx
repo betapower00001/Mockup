@@ -189,7 +189,7 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     bottom: TYPE4_COLORS,
   },
 
-    "TYPE-5": {
+  "TYPE-5": {
     top: [
       { label: "ขาว", value: "#ffffff" },
       { label: "กรมท่า", value: "#1e266a" },
@@ -2165,7 +2165,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                   }}
                 />
                 {isMobileLayout && (
-                  <div className="mobileOrbitOverlay" aria-label="ปุ่มหมุน 3D บนมือถือ">
+                  <div className="mobileOrbitBar" aria-label="ปุ่มหมุน 3D บนมือถือ">
                     <div className="orbitPad">
                       <div className="orbitPadHint">หมุน 3D</div>
 
@@ -2453,18 +2453,20 @@ function Slider({
 // ปรับปรุงส่วน CSS สำหรับ Desktop Web App View
 // ============================================
 const CSS = `
-  .pc-wrap{
-    height: 100vh;
-    overflow: hidden;
-    padding: 16px;
-    box-sizing: border-box;
-    background:
-      radial-gradient(900px 500px at 10% 0%, rgba(59,130,246,.22), transparent 60%),
-      radial-gradient(900px 500px at 90% 10%, rgba(168,85,247,.16), transparent 55%),
-      linear-gradient(180deg, #f7f9ff, #eef2ff 60%, #f8fafc);
-    display: flex;
-    flex-direction: column;
-  }
+.pc-wrap{
+  height: 100vh;
+  overflow: hidden;
+  padding: 16px;
+  box-sizing: border-box;
+  background:
+    linear-gradient(rgba(255,255,255,0), rgba(255,255,255,0)),
+    url("/BG-1.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  display: flex;
+  flex-direction: column;
+}
 
   .pc-grid{
     flex: 1;
@@ -2988,7 +2990,8 @@ const CSS = `
     position:relative;
   }
 
-  .mobileOrbitOverlay{
+  .mobileOrbitOverlay,
+  .mobileOrbitBar{
     display:none;
   }
 
@@ -2997,91 +3000,96 @@ const CSS = `
       display:none;
     }
 
-    .mobileOrbitOverlay{
+    .mockWithOverlay{
+      padding-bottom:76px;
+    }
+
+    .mobileOrbitBar{
       position:absolute;
-      right:12px;
-      bottom:12px;
+      left:50%;
+      bottom:10px;
+      transform:translateX(-50%);
       z-index:20;
-      display:block;
+      display:flex;
+      justify-content:center;
       pointer-events:none;
+      width:100%;
     }
 
     .orbitPad{
       pointer-events:auto;
       display:flex;
-      flex-direction:column;
       align-items:center;
       gap:8px;
-      padding:10px 10px 12px;
-      border-radius:20px;
-      background:rgba(255,255,255,.68);
-      border:1px solid rgba(255,255,255,.72);
-      box-shadow:0 14px 30px rgba(15,23,42,.16);
+      padding:8px 10px;
+      border-radius:999px;
+      background:rgba(255,255,255,.78);
+      border:1px solid rgba(255,255,255,.8);
+      box-shadow:0 10px 24px rgba(15,23,42,.14);
       backdrop-filter:blur(12px);
       -webkit-backdrop-filter:blur(12px);
     }
 
     .orbitPadHint{
-      font-size:10px;
-      font-weight:800;
-      letter-spacing:.08em;
+      font-size:11px;
+      font-weight:900;
       color:#64748b;
-      text-transform:uppercase;
+      white-space:nowrap;
       user-select:none;
     }
 
     .orbitPadGrid{
-      display:grid;
-      grid-template-columns:repeat(3, 42px);
-      grid-template-rows:repeat(3, 42px);
-      gap:6px;
+      display:flex;
       align-items:center;
-      justify-items:center;
+      gap:6px;
+    }
+
+    .orbitPadGrid > div:not(.orbitPadCenter){
+      display:none;
+    }
+
+    .orbitPadCenter{
+      width:8px;
+      height:8px;
+      border-radius:999px;
+      background:#94a3b8;
+      flex:0 0 auto;
+    }
+
+    .orbitPadDot{
+      display:none;
     }
 
     .orbitArrow{
-      width:42px;
-      height:42px;
+      width:38px;
+      height:38px;
       border:none;
-      border-radius:14px;
-      background:rgba(255,255,255,.9);
+      border-radius:999px;
+      background:#ffffff;
       color:#334155;
       display:grid;
       place-items:center;
       cursor:pointer;
       user-select:none;
       -webkit-tap-highlight-color:transparent;
-      box-shadow:0 8px 18px rgba(15,23,42,.08);
+      box-shadow:0 6px 14px rgba(15,23,42,.12);
       transition:transform .12s ease, box-shadow .18s ease, background .18s ease, color .18s ease;
+      font-size:22px;
+      font-weight:900;
     }
 
     .orbitArrow span{
-      font-size:24px;
+      font-size:22px;
       line-height:1;
       font-weight:900;
       transform:translateY(-1px);
     }
 
     .orbitArrow:active{
-      transform:scale(.95);
+      transform:scale(.94);
       background:rgba(239,246,255,.96);
       color:#1d4ed8;
       box-shadow:0 10px 18px rgba(37,99,235,.16);
-    }
-
-    .orbitPadCenter{
-      width:42px;
-      height:42px;
-      display:grid;
-      place-items:center;
-    }
-
-    .orbitPadDot{
-      width:10px;
-      height:10px;
-      border-radius:999px;
-      background:rgba(148,163,184,.7);
-      box-shadow:0 0 0 6px rgba(148,163,184,.12);
     }
   }
 
