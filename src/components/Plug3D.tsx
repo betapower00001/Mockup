@@ -1083,7 +1083,9 @@ function LogoLayer({
   logo: LogoItem;
   index: number;
 }) {
-  const isType3 = config.id === "TYPE-3" || config.id === "TYPE-5";
+  // ✅ แยก TYPE-2 ออกมา เพื่อแก้เฉพาะ TYPE-2 ไม่ให้กระทบ TYPE อื่น
+  const isType2 = config.id === "TYPE-2";
+  const isType3 = isType2 || config.id === "TYPE-3" || config.id === "TYPE-5";
   const isType4 = config.id === "TYPE-4";
   const isFixedLogoType = isType3 || isType4;
 
@@ -1181,8 +1183,11 @@ function LogoLayer({
       dv = Math.max(0.001, dv);
 
       const maxDim = Math.max(du, dv);
-      const normX = du / maxDim;
-      const normY = dv / maxDim;
+
+      // ✅ TYPE-2 เท่านั้น: ไม่ normalize ตาม bbox เพราะทำให้โลโก้/วงกลมยืดเป็นวงรี
+      // TYPE อื่นยังใช้ logic เดิมทั้งหมด เพื่อไม่ให้กระทบตำแหน่ง/สัดส่วนที่ตั้งไว้แล้ว
+      const normX = isType2 ? 1 : du / maxDim;
+      const normY = isType2 ? 1 : dv / maxDim;
 
       const rotUI = logo.transform?.rot ?? 0;
       const totalRot = decalRot + rotUI;
@@ -1208,7 +1213,7 @@ function LogoLayer({
       stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(decalRot).translate(0.5, 0.5);
     }
 
-  }, [logo.transform, stickerTex, logoMesh, isFixedLogoType, isType4, decalProj, decalRot]);
+  }, [logo.transform, stickerTex, logoMesh, isFixedLogoType, isType2, isType4, decalProj, decalRot]);
 
   return null;
 }
@@ -1294,7 +1299,9 @@ function PlugScene({
     const m = findMeshByName(scene, config.decal.meshName);
 
     if (m) {
-      if (config.id === "TYPE-3" || config.id === "TYPE-5") {
+      // ✅ TYPE-2 เท่านั้นที่เพิ่มเข้ามา: ใช้ UV by normal เพื่อกันโลโก้บิด/ยืดบนผิวที่เอียง
+      // TYPE-3 / TYPE-5 ใช้ของเดิมเหมือนเดิม
+      if (config.id === "TYPE-2" || config.id === "TYPE-3" || config.id === "TYPE-5") {
         ensurePlanarUVByNormal(m, config.decal.flipU, config.decal.flipV, true);
       } else if (config.id === "TYPE-4") {
         ensurePlanarUV(
@@ -1731,6 +1738,7 @@ function PlugScene({
 
     if (e.uv) {
       const isFixedLogoType =
+        config.id === "TYPE-2" ||
         config.id === "TYPE-3" ||
         config.id === "TYPE-4" ||
         config.id === "TYPE-5";
@@ -1750,6 +1758,7 @@ function PlugScene({
 
     if (e.uv) {
       const isFixedLogoType =
+        config.id === "TYPE-2" ||
         config.id === "TYPE-3" ||
         config.id === "TYPE-4" ||
         config.id === "TYPE-5";

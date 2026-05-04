@@ -122,13 +122,19 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
 
     decal: {
       meshName: "Top_Front",
-      position: [0, 0, 0.002],
+      position: [0, 0, 0.004],
       rotation: [0, 0, 0],
       scale: [0.08, 0.08, 0.08],
-      uvProjection: "YZ",
+
+      // ✅ แก้โลโก้ยืดของ TYPE-2
+      uvProjection: "XZ",
       flipU: false,
       flipV: false,
       uvSpace: "local",
+
+      // ✅ บังคับ UV ใหม่ ไม่ใช้ UV เดิมที่ทำให้โลโก้ยืด
+      forceUV: true,
+      lockAxes: true,
     },
 
     patternDecal: {
@@ -384,7 +390,7 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       worldAlign: true,
       fitMode: "cover",
     },
-    
+
     patternSideDecal: {
       meshName: "Top_Side",
       position: [0, 0, 0.002],

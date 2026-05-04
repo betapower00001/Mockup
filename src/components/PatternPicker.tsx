@@ -17,10 +17,7 @@ interface PatternGroup {
 }
 
 interface Props {
-  // ✅ ของเดิมยังใช้ได้
   patternsForSelected?: PatternItem[];
-
-  // ✅ ของใหม่: ถ้าส่งมา จะใช้แท็บแยกหมวดจริง
   patternGroupsForSelected?: PatternGroup[];
 
   uploadedExamples: string[];
@@ -56,9 +53,7 @@ export default function PatternPicker({
 
     reader.onload = () => {
       const result = reader.result;
-      if (typeof result === "string") {
-        onUpload(result);
-      }
+      if (typeof result === "string") onUpload(result);
     };
 
     reader.onerror = () => {
@@ -69,11 +64,8 @@ export default function PatternPicker({
     e.currentTarget.value = "";
   }
 
-  // ✅ รองรับทั้งแบบเดิม และแบบ grouped
   const systemGroups = useMemo<PatternGroup[]>(() => {
-    if (patternGroupsForSelected.length > 0) {
-      return patternGroupsForSelected;
-    }
+    if (patternGroupsForSelected.length > 0) return patternGroupsForSelected;
 
     return [
       {
@@ -84,7 +76,6 @@ export default function PatternPicker({
     ];
   }, [patternGroupsForSelected, patternsForSelected]);
 
-  // ✅ เพิ่มแท็บลายอัปโหลดแยกให้อัตโนมัติ
   const allGroups = useMemo<PatternGroup[]>(() => {
     const groups: PatternGroup[] = [...systemGroups];
 
@@ -113,21 +104,75 @@ export default function PatternPicker({
     }
 
     const exists = allGroups.some((g) => g.id === activeTab);
-    if (!exists) {
-      setActiveTab(allGroups[0].id);
-    }
+    if (!exists) setActiveTab(allGroups[0].id);
   }, [allGroups, activeTab]);
 
   const activeGroup = allGroups.find((g) => g.id === activeTab) || allGroups[0];
   const activeItems = activeGroup?.items ?? [];
   const hasMultipleTabs = allGroups.length > 1;
 
-  // ✅ Auto column เต็มพื้นที่ก่อน แล้วค่อยขึ้นบรรทัดใหม่
+  const rootStyle: React.CSSProperties = {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    overflowX: "hidden",
+  };
+
+  const topBarStyle: React.CSSProperties = {
+    display: "flex",
+    gap: 10,
+    marginBottom: 12,
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+  };
+
+  const actionWrapStyle: React.CSSProperties = {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    maxWidth: "100%",
+    minWidth: 0,
+  };
+
+  const tabsOuterStyle: React.CSSProperties = {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    overflow: "visible",
+  };
+
+  const tabsWrapStyle: React.CSSProperties = {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    overflow: "visible",
+    paddingBottom: 8,
+    marginBottom: 12,
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+  };
+
+  const gridWrapStyle: React.CSSProperties = {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    overflowX: "hidden",
+  };
+
   const gridStyle: React.CSSProperties = {
     display: "grid",
     gap: 10,
     gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, ${thumbSize}px))`,
     justifyContent: "start",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
   };
 
   const tileStyle: React.CSSProperties = {
@@ -175,18 +220,6 @@ export default function PatternPicker({
     opacity: 0.8,
   };
 
-  // ✅ แท็บเลื่อนซ้ายขวาได้ ไม่ wrap หลายบรรทัด
-  const tabsWrapStyle: React.CSSProperties = {
-    display: "flex",
-    gap: 8,
-    flexWrap: "nowrap",
-    overflowX: "auto",
-    overflowY: "hidden",
-    paddingBottom: 4,
-    marginBottom: 12,
-    scrollbarWidth: "thin",
-  };
-
   function renderTile(item: PatternItem) {
     return (
       <div
@@ -200,14 +233,14 @@ export default function PatternPicker({
         }}
         style={tileStyle}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
-          (e.currentTarget as HTMLDivElement).style.boxShadow = "0 6px 12px rgba(30,55,90,.12)";
-          (e.currentTarget as HTMLDivElement).style.borderColor = "#3b82f6";
+          e.currentTarget.style.transform = "translateY(-2px)";
+          e.currentTarget.style.boxShadow = "0 6px 12px rgba(30,55,90,.12)";
+          e.currentTarget.style.borderColor = "#3b82f6";
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-          (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
-          (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(210,218,235,.9)";
+          e.currentTarget.style.transform = "translateY(0)";
+          e.currentTarget.style.boxShadow = "none";
+          e.currentTarget.style.borderColor = "rgba(210,218,235,.9)";
         }}
       >
         <img src={item.preview || item.img} alt={item.name} style={imgStyle} />
@@ -217,24 +250,15 @@ export default function PatternPicker({
   }
 
   return (
-    <div>
-      {/* แถบปุ่มเดิม */}
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          marginBottom: 12,
-          flexWrap: "wrap",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center" }}>
+    <div style={rootStyle}>
+      <div style={topBarStyle}>
+        <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
           <span style={{ fontSize: 12, color: "#64748b", fontWeight: 800 }}>
             เลือกลายด้านล่าง
           </span>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={actionWrapStyle}>
           <label
             style={{
               padding: "6px 10px",
@@ -249,6 +273,8 @@ export default function PatternPicker({
               fontWeight: 900,
               userSelect: "none",
               transition: "transform 0.1s ease",
+              flex: "0 0 auto",
+              whiteSpace: "nowrap",
             }}
             title="อัปโหลดลาย (PNG/JPG)"
             onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.02)")}
@@ -270,6 +296,8 @@ export default function PatternPicker({
               fontWeight: 900,
               cursor: disableReset ? "not-allowed" : "pointer",
               opacity: disableReset ? 0.5 : 1,
+              flex: "0 0 auto",
+              whiteSpace: "nowrap",
             }}
             onClick={onReset}
             disabled={!!disableReset}
@@ -280,40 +308,48 @@ export default function PatternPicker({
         </div>
       </div>
 
-      <div style={{ height: 1, background: "rgba(226,232,240,1)", margin: "0 0 12px 0" }} />
+      <div
+        style={{
+          height: 1,
+          background: "rgba(226,232,240,1)",
+          margin: "0 0 12px 0",
+        }}
+      />
 
-      {/* แท็บ */}
       {hasMultipleTabs && (
-        <div style={tabsWrapStyle}>
-          {allGroups.map((group) => {
-            const isActive = group.id === activeGroup?.id;
-            return (
-              <button
-                key={group.id}
-                type="button"
-                onClick={() => setActiveTab(group.id)}
-                style={{
-                  padding: "7px 12px",
-                  borderRadius: 999,
-                  border: isActive
-                    ? "1px solid rgba(37,99,235,.95)"
-                    : "1px solid rgba(210,218,235,.95)",
-                  background: isActive
-                    ? "linear-gradient(180deg, rgba(59,130,246,.98), rgba(37,99,235,.98))"
-                    : "rgba(255,255,255,.92)",
-                  color: isActive ? "#fff" : "#334155",
-                  fontSize: 12,
-                  fontWeight: 900,
-                  cursor: "pointer",
-                  boxShadow: isActive ? "0 8px 16px rgba(37,99,235,.18)" : "none",
-                  flex: "0 0 auto",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {group.label}
-              </button>
-            );
-          })}
+        <div style={tabsOuterStyle}>
+          <div style={tabsWrapStyle}>
+            {allGroups.map((group) => {
+              const isActive = group.id === activeGroup?.id;
+
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  onClick={() => setActiveTab(group.id)}
+                  style={{
+                    padding: "7px 12px",
+                    borderRadius: 999,
+                    border: isActive
+                      ? "1px solid rgba(37,99,235,.95)"
+                      : "1px solid rgba(210,218,235,.95)",
+                    background: isActive
+                      ? "linear-gradient(180deg, rgba(59,130,246,.98), rgba(37,99,235,.98))"
+                      : "rgba(255,255,255,.92)",
+                    color: isActive ? "#fff" : "#334155",
+                    fontSize: 12,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                    boxShadow: isActive ? "0 8px 16px rgba(37,99,235,.18)" : "none",
+                    flex: "0 0 auto",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {group.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -322,7 +358,9 @@ export default function PatternPicker({
       {activeItems.length === 0 ? (
         <div style={{ fontSize: 12, opacity: 0.65 }}>ไม่มีลวดลายในหมวดนี้</div>
       ) : (
-        <div style={gridStyle}>{activeItems.map(renderTile)}</div>
+        <div style={gridWrapStyle}>
+          <div style={gridStyle}>{activeItems.map(renderTile)}</div>
+        </div>
       )}
     </div>
   );
