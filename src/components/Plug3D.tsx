@@ -1484,8 +1484,10 @@ function PlugScene({
 
     const fitMode =
       config.id === "TYPE-5"
-        ? ((config.patternDecal as any)?.fitMode ?? "cover")
-        : (patternFitMode ?? "contain"); const minRepeat = 0;
+        ? "cover"
+        : (patternFitMode ?? "contain");
+
+    const minRepeat = 0;
 
     if (wantsWorldMain && patternWorldBBox && isFixedType && fixedWorldAxes) {
       axes = fixedWorldAxes;
@@ -1505,7 +1507,8 @@ function PlugScene({
       fitMode,
       minRepeat,
       lockAxes: isFixedType ? true : config.patternDecal?.lockAxes,
-      stableRotate: isFixedType,
+      // ✅ TYPE-5 ไม่เข้า fixed axes แต่เปิด stableRotate เพื่อตัดอาการซูมเข้า-ออกตอนหมุน
+      stableRotate: config.id === "TYPE-5" ? true : isFixedType,
     });
   }, [
     logoMesh,
