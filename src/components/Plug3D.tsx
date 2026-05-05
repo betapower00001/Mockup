@@ -56,7 +56,7 @@ type Plug3DProps = {
   dragLogoMode?: boolean;
   dragPatternMode?: boolean;
   renderMode?: boolean;
-  view?: "front" | "angle";
+  view?: RenderViewName;
   onRenderReady?: (render: PlugRenderFn) => void;
   orbitNudgeDirection?: OrbitNudgeDirection;
   orbitNudgeTick?: number;
