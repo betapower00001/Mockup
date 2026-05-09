@@ -133,7 +133,7 @@ function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCam
       dir = new THREE.Vector3(0, 0.08, -1);
       break;
     case "top":
-      dir = new THREE.Vector3(0, 1.45, 0.001);
+      dir = new THREE.Vector3(0, 1.45, -0.001);
       break;
   }
 
@@ -285,16 +285,16 @@ function withProductionArtworkVisibility(scene: THREE.Object3D, config: PlugMode
     (
       strictFrontOnly
         ? [
-            config.decal.meshName,
-            config.patternDecal?.meshName,
-            config.patternWorldRefMesh,
-            ...(config.patternWorldBBoxMeshes ?? []),
-          ]
+          config.decal.meshName,
+          config.patternDecal?.meshName,
+          config.patternWorldRefMesh,
+          ...(config.patternWorldBBoxMeshes ?? []),
+        ]
         : [
-            config.decal.meshName,
-            config.patternDecal?.meshName,
-            config.patternSideDecal?.meshName,
-          ]
+          config.decal.meshName,
+          config.patternDecal?.meshName,
+          config.patternSideDecal?.meshName,
+        ]
     ).filter(Boolean) as string[]
   );
 
@@ -1905,7 +1905,7 @@ export default function Plug3D({
   dragLogoMode = false,
   dragPatternMode = false,
   renderMode = false,
-  view = "angle",
+  view = "top",
   onRenderReady,
   orbitNudgeDirection = null,
   orbitNudgeTick = 0,

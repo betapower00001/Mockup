@@ -61,7 +61,7 @@ const DEFAULT_CUSTOMIZATION: CustomizationState = {
   bottomColor: "#eaeaea",
   switchColor: "#ffffff",
   patternUrl: "",
-  view: "angle",
+  view: "top",
 };
 
 const DEFAULT_LOGO_TRANSFORM: LogoTransform = {
