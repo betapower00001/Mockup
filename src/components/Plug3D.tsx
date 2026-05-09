@@ -184,7 +184,7 @@ function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCa
       mul = 1.0;
       break;
     case "top":
-      dir = new THREE.Vector3(0, 1.7, 0.04);
+      dir = new THREE.Vector3(0, 1.7, -0.04);
       mul = 1.02;
       break;
   }
