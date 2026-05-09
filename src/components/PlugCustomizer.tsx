@@ -1237,12 +1237,7 @@ export default function PlugCustomizer({ plugId }: Props) {
           filename: `plug-${selectedPlugId}-${item.key}.png`,
         });
 
-        const finalSrc = rawSrc
-          ? item.key === "top"
-            ? await rotateImage180DataUrl(rawSrc)
-            : rawSrc
-          : null;
-
+        const finalSrc = rawSrc ?? null;
         return {
           label: item.label,
           src: finalSrc,
@@ -1407,7 +1402,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     });
 
     if (!src) return null;
-    return view === "top" ? await rotateImage180DataUrl(src) : src;
+    return src;
   }
 
   async function refreshInlinePreviews() {
@@ -3072,12 +3067,70 @@ input[type="range"]{
 }
 
 @media (max-width: 768px){
+  .pc-wrap{
+    height:auto;
+    min-height:100vh;
+    min-height:100svh;
+    overflow-x:hidden;
+    overflow-y:auto;
+    padding:8px;
+    box-sizing:border-box;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .pc-grid{
+    gap:10px;
+    grid-template-columns:1fr;
+    min-height:0;
+  }
+
+  .left-panel,
+  .right-panel{
+    height:auto;
+    overflow:visible;
+    padding-right:0;
+    gap:10px;
+  }
+
+  .left-card-top{
+    flex:none;
+    min-height:0;
+  }
+
+  .card{
+    border-radius:24px;
+  }
+
+  .head{
+    padding:9px 10px;
+  }
+
+  .body{
+    padding:10px;
+  }
+
   .quickActionsCard{
     display:none;
   }
 
+  .mock{
+    flex:none;
+    width:100%;
+    height:min(58vh, 360px);
+    min-height:300px;
+    max-height:360px;
+    border-radius:22px;
+  }
+
   .mockWithOverlay{
-    padding-bottom:76px;
+    position:relative;
+    padding-bottom:72px;
+  }
+
+  .mockWithOverlay canvas{
+    display:block;
+    width:100% !important;
+    height:100% !important;
   }
 
   .mobileOrbitBar{
@@ -3085,6 +3138,7 @@ input[type="range"]{
     left:50%;
     bottom:10px;
     transform:translateX(-50%);
+    transform-origin:center bottom;
     z-index:20;
     display:flex;
     justify-content:center;
@@ -3166,6 +3220,88 @@ input[type="range"]{
     background:rgba(239,246,255,.96);
     color:#1d4ed8;
     box-shadow:0 10px 18px rgba(37,99,235,.16);
+  }
+}
+
+@media (max-width: 390px) and (max-height: 740px){
+  .pc-wrap{
+    padding:6px;
+    min-height:100vh;
+    min-height:100svh;
+  }
+
+  .pc-grid{
+    gap:8px;
+  }
+
+  .left-panel{
+    gap:8px;
+  }
+
+  .head{
+    padding:8px 9px;
+  }
+
+  .title{
+    font-size:13px;
+  }
+
+  .sub{
+    font-size:11px;
+  }
+
+  .body{
+    padding:8px;
+  }
+
+  .mock{
+    height:310px;
+    min-height:310px;
+    max-height:310px;
+    border-radius:20px;
+  }
+
+  .mockWithOverlay{
+    padding-bottom:64px;
+  }
+
+  .mobileOrbitBar{
+    bottom:8px;
+    transform:translateX(-50%) scale(.9);
+    transform-origin:center bottom;
+  }
+
+  .orbitPad{
+    gap:5px;
+    padding:6px 8px;
+  }
+
+  .orbitPadHint{
+    font-size:10px;
+  }
+
+  .orbitPadGrid{
+    gap:5px;
+  }
+
+  .orbitArrow{
+    width:34px;
+    height:34px;
+    font-size:19px;
+  }
+
+  .orbitArrow span{
+    font-size:19px;
+  }
+
+  .badge,
+  .badgeSoft{
+    padding:5px 8px;
+    font-size:11px;
+  }
+
+  .row{
+    gap:6px;
   }
 }
 `;
