@@ -3071,8 +3071,7 @@ input[type="range"]{
     height:auto;
     min-height:100vh;
     min-height:100svh;
-    overflow-x:hidden;
-    overflow-y:auto;
+    overflow:visible;
     padding:8px;
     box-sizing:border-box;
     -webkit-overflow-scrolling:touch;
@@ -3082,19 +3081,40 @@ input[type="range"]{
     gap:10px;
     grid-template-columns:1fr;
     min-height:0;
+    max-width:100%;
+    align-items:start;
   }
 
-  .left-panel,
-  .right-panel{
+  .left-panel{
+    position:sticky;
+    top:0;
+    z-index:80;
+    align-self:start;
     height:auto;
     overflow:visible;
     padding-right:0;
     gap:10px;
+    background:rgba(255,255,255,.68);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    border-radius:24px;
+  }
+
+  .right-panel{
+    position:relative;
+    z-index:1;
+    height:auto;
+    overflow:visible;
+    padding-right:0;
+    gap:10px;
+    min-height:0;
   }
 
   .left-card-top{
     flex:none;
     min-height:0;
+    margin-bottom:0;
+    box-shadow:0 12px 28px rgba(15,23,42,.12);
   }
 
   .card{
@@ -3116,9 +3136,9 @@ input[type="range"]{
   .mock{
     flex:none;
     width:100%;
-    height:min(58vh, 360px);
-    min-height:300px;
-    max-height:360px;
+    height:clamp(260px, 44svh, 340px);
+    min-height:260px;
+    max-height:340px;
     border-radius:22px;
   }
 
@@ -3228,6 +3248,7 @@ input[type="range"]{
     padding:6px;
     min-height:100vh;
     min-height:100svh;
+    overflow:visible;
   }
 
   .pc-grid{
@@ -3235,7 +3256,13 @@ input[type="range"]{
   }
 
   .left-panel{
+    top:0;
     gap:8px;
+    border-radius:22px;
+  }
+
+  .left-card-top{
+    box-shadow:0 10px 24px rgba(15,23,42,.12);
   }
 
   .head{
@@ -3255,9 +3282,9 @@ input[type="range"]{
   }
 
   .mock{
-    height:310px;
-    min-height:310px;
-    max-height:310px;
+    height:250px;
+    min-height:250px;
+    max-height:250px;
     border-radius:20px;
   }
 
