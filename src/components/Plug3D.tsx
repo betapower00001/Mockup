@@ -14,7 +14,7 @@ import { useStickerTexture } from "./useStickerTexture";
 
 const cityEnv = import("@pmndrs/assets/hdri/city.exr").then((m) => m.default);
 
-export type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top";
+export type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top" | "bottom";
 
 export type PlugRenderOptions = {
   transparent?: boolean;
@@ -135,6 +135,9 @@ function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCam
     case "top":
       dir = new THREE.Vector3(0, 1.45, -0.001);
       break;
+    case "bottom":
+      dir = new THREE.Vector3(0, -1.45, 0.001);
+      break;
   }
 
   const position = center.clone().add(dir.normalize().multiplyScalar(dist));
@@ -185,6 +188,10 @@ function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCa
       break;
     case "top":
       dir = new THREE.Vector3(0, 1.7, -0.04);
+      mul = 1.02;
+      break;
+    case "bottom":
+      dir = new THREE.Vector3(0, -1.7, 0.04);
       mul = 1.02;
       break;
   }

@@ -25,7 +25,7 @@ interface CustomizationState {
   bottomColor: string;
   switchColor: string;
   patternUrl: string; // "" = ไม่มีลาย
-  view: "front" | "angle" | "top";
+  view: RenderViewName;
 }
 
 export type LogoTransform = {
@@ -239,6 +239,57 @@ const A4_VIEWS: { key: RenderViewName; label: string }[] = [
   { key: "right", label: "ด้านขวา" },
   { key: "back", label: "ด้านหลัง" },
   { key: "top", label: "ด้านบน" },
+];
+
+const VIEW_BUTTONS: {
+  key: RenderViewName;
+  label: string;
+  icon: string;
+  gradient: string;
+  soft: string;
+}[] = [
+  {
+    key: "top",
+    label: "มุมบน",
+    icon: "↟",
+    gradient: "linear-gradient(135deg,#8b5cf6,#ec4899)",
+    soft: "linear-gradient(135deg,#a855f7,#ec4899)",
+  },
+  {
+    key: "front",
+    label: "ด้านหน้า",
+    icon: "↥",
+    gradient: "linear-gradient(135deg,#f97316,#ef4444)",
+    soft: "linear-gradient(135deg,#fb923c,#f87171)",
+  },
+  {
+    key: "back",
+    label: "ด้านหลัง",
+    icon: "↧",
+    gradient: "linear-gradient(135deg,#64748b,#334155)",
+    soft: "linear-gradient(135deg,#94a3b8,#64748b)",
+  },
+  {
+    key: "left",
+    label: "ด้านซ้าย",
+    icon: "↤",
+    gradient: "linear-gradient(135deg,#22c55e,#14b8a6)",
+    soft: "linear-gradient(135deg,#4ade80,#2dd4bf)",
+  },
+  {
+    key: "right",
+    label: "ด้านขวา",
+    icon: "↦",
+    gradient: "linear-gradient(135deg,#06b6d4,#6366f1)",
+    soft: "linear-gradient(135deg,#22d3ee,#818cf8)",
+  },
+  {
+    key: "bottom",
+    label: "ด้านล่าง",
+    icon: "↡",
+    gradient: "linear-gradient(135deg,#7c3aed,#2563eb)",
+    soft: "linear-gradient(135deg,#a78bfa,#60a5fa)",
+  },
 ];
 
 function normalizeHex(hex?: string) {
@@ -1047,6 +1098,7 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [orbitNudgeTick, setOrbitNudgeTick] = useState(0);
   const [orbitNudgeDirection, setOrbitNudgeDirection] = useState<OrbitNudgeDirection | null>(null);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [mobileAccordionOpen, setMobileAccordionOpen] = useState(true);
   const [viewPreviewMap, setViewPreviewMap] = useState<Partial<Record<RenderViewName, string>>>({});
   const [viewPreviewLoading, setViewPreviewLoading] = useState(false);
 
@@ -1618,14 +1670,133 @@ export default function PlugCustomizer({ plugId }: Props) {
     // ไม่เด้งไปขั้นตอนอื่นอัตโนมัติ ให้ลูกค้ากดถัดไปเอง
   }
 
+  function scrollToMobileStep(stepId: StepId) {
+    if (!isMobileLayout || typeof window === "undefined") return;
+
+    const run = () => {
+      const el = document.getElementById(`mobile-step-item-${stepId}`);
+      if (!el) return;
+
+      const stickyPreview = document.querySelector<HTMLElement>(".left-panel");
+      const stickyHeight = stickyPreview?.getBoundingClientRect().height ?? 0;
+      const safeGap = 14;
+      const targetY = Math.max(
+        0,
+        el.getBoundingClientRect().top + window.scrollY - stickyHeight - safeGap
+      );
+
+      window.scrollTo({
+        top: targetY,
+        behavior: "smooth",
+      });
+    };
+
+    // เรียก 2 จังหวะ: หลัง React render และหลัง panel ขยาย เพื่อไม่ให้หัวข้อเด้งไปซ่อนใต้กล่อง Preview/Status บนมือถือ
+    window.requestAnimationFrame(() => {
+      run();
+      window.setTimeout(run, 220);
+    });
+  }
+
   function goNext() {
     const next = STEPS[currentStepIdx + 1]?.id;
-    if (next) setStep(next);
+    if (next) {
+      setStep(next);
+      if (isMobileLayout) {
+        setMobileAccordionOpen(true);
+        scrollToMobileStep(next);
+      }
+    }
   }
 
   function goBack() {
     const prev = STEPS[currentStepIdx - 1]?.id;
-    if (prev) setStep(prev);
+    if (prev) {
+      setStep(prev);
+      if (isMobileLayout) {
+        setMobileAccordionOpen(true);
+        scrollToMobileStep(prev);
+      }
+    }
+  }
+
+  function handleStepButtonClick(stepId: StepId) {
+    const isSameStep = stepId === step;
+
+    if (isMobileLayout) {
+      if (isSameStep) {
+        setMobileAccordionOpen(!mobileAccordionOpen);
+      } else {
+        setStep(stepId);
+        setMobileAccordionOpen(true);
+      }
+
+      scrollToMobileStep(stepId);
+      return;
+    }
+
+    setStep(stepId);
+  }
+
+  function renderStepNavButtons() {
+    return (
+      <div style={{ marginTop: 16 }}>
+        <div className="divider" style={{ margin: "0 0 12px 0" }} />
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <button type="button" className="btn btnGhost" onClick={goBack} disabled={currentStepIdx === 0}>
+            ← ย้อนกลับ
+          </button>
+          <button
+            type="button"
+            className={`btn ${currentStepIdx === STEPS.length - 1 ? "btnGhost" : "btnPrimary"}`}
+            onClick={goNext}
+            disabled={currentStepIdx === STEPS.length - 1}
+          >
+            ถัดไป →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderViewButtonSelector(extraClass = "") {
+    return (
+      <div
+        className={`viewUnderPreview ${extraClass}`.trim()}
+        aria-label="ปุ่มเลือกมุมมอง"
+      >
+        <div className="viewUnderPreviewHead">
+          <div>
+            <div className="viewUnderTitle">มุมมอง</div>
+          </div>
+          <span className="viewUnderCurrent">
+            {VIEW_BUTTONS.find((item) => item.key === customization.view)?.label ?? "มุมปัจจุบัน"}
+          </span>
+        </div>
+
+        <div className="viewUnderGrid">
+          {VIEW_BUTTONS.map((item) => {
+            const active = customization.view === item.key;
+
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className={`viewUnderBtn${active ? " active" : ""}`}
+                style={{
+                  background: active ? item.gradient : item.soft,
+                }}
+                onClick={() => patchCustomization({ view: item.key })}
+                title={`เลือก${item.label}`}
+              >
+                <span className="viewUnderIcon">{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
   }
 
   function rotatePattern(deltaRad: number) {
@@ -1989,9 +2160,14 @@ export default function PlugCustomizer({ plugId }: Props) {
 
     return (
       <div>
-        <div className="label">มุมมอง</div>
-        <div className="hint">เลือกมุมมองสำหรับโชว์/ดาวน์โหลด</div>
-        <div style={{ marginTop: 10 }}>
+        {!isMobileLayout && (
+          <>
+            <div className="label">มุมมอง</div>
+            <div className="hint">เลือกมุมมองสำหรับโชว์/ดาวน์โหลด</div>
+          </>
+        )}
+
+        <div style={{ marginTop: isMobileLayout ? 0 : 10 }}>
           <LayoutPreview
             view={customization.view}
             onSetView={(v) => patchCustomization({ view: v })}
@@ -2218,6 +2394,9 @@ export default function PlugCustomizer({ plugId }: Props) {
                 )}
               </div>
 
+              {/* ✅ จอใหญ่ยังโชว์ปุ่มมุมมองใต้ภาพ 3D / จอเล็กให้ปุ่มเด้งไปต่อท้าย Accordion หมวด 5) มุมมอง */}
+              {!isMobileLayout && renderViewButtonSelector()}
+
               <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
                 <div className="row">
                   <span className="badgeSoft">รุ่น: {plug.name ?? selectedPlugId}</span>
@@ -2309,7 +2488,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                     {showQuickSwitch &&
                       renderQuickColorCard({
                         label: "สวิตช์",
-                        sub: "ปรับสีสวิตช์แยกได้สำหรับรุ่นที่รองรับ",
+                        sub: "ปรับสีสวิตช์แยกตามรุ่นที่รองรับ",
                         value: customization.switchColor,
                         fallback: (currentColorOptions.switch ?? currentColorOptions.top)[0]?.value ?? "#ffffff",
                         onChange: (color) => patchCustomization({ switchColor: color }),
@@ -2341,44 +2520,68 @@ export default function PlugCustomizer({ plugId }: Props) {
                 {STEPS.map((s, idx) => {
                   const active = s.id === step;
                   const done = idx < currentStepIdx;
+                  const accordionOpen = active && mobileAccordionOpen;
+
                   return (
-                    <button
+                    <div
                       key={s.id}
-                      type="button"
-                      className={`stepItem ${active ? "stepActive" : ""} ${done ? "stepDone" : ""}`}
-                      onClick={() => setStep(s.id)}
+                      id={isMobileLayout ? `mobile-step-item-${s.id}` : undefined}
+                      className={`stepAccordionItem ${accordionOpen ? "accordionOpen" : ""}`}
                     >
-                      <span className="stepDot">{done ? "✓" : idx + 1}</span>
-                      <span className="stepText">{s.title}</span>
-                    </button>
+                      <button
+                        type="button"
+                        className={`stepItem ${active ? "stepActive" : ""} ${done ? "stepDone" : ""}`}
+                        onClick={() => handleStepButtonClick(s.id)}
+                        aria-expanded={isMobileLayout ? accordionOpen : undefined}
+                        aria-controls={isMobileLayout ? `mobile-step-panel-${s.id}` : undefined}
+                      >
+                        <span className="stepDot">{done ? "✓" : idx + 1}</span>
+                        <span className="stepText">
+                          <span>{s.title}</span>
+                          <small>{s.sub}</small>
+                        </span>
+                        {isMobileLayout && (
+                          <span className="stepChevron" aria-hidden="true">
+                            {accordionOpen ? "⌃" : "⌄"}
+                          </span>
+                        )}
+                      </button>
+
+                      {isMobileLayout && s.id === "view" && (
+                        <div className="mobileViewAppendSlot">
+                          {renderViewButtonSelector("mobileViewAccordionSelector")}
+                        </div>
+                      )}
+
+                      {isMobileLayout && active && (
+                        <div
+                          id={`mobile-step-panel-${s.id}`}
+                          className={`mobileStepPanel ${accordionOpen ? "open" : "closed"}`}
+                        >
+                          <div className="mobileStepPanelInner">
+                            {renderStepContent()}
+                            {renderStepNavButtons()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
 
-              <div className="config-divider" />
+              {!isMobileLayout && (
+                <>
+                  <div className="config-divider" />
 
-              <div className="config-content">
-                <div style={{ flex: 1, overflowY: "auto", paddingRight: 6 }}>
-                  {renderStepContent()}
-                </div>
+                  <div className="config-content">
+                    <div style={{ flex: 1, overflowY: "auto", paddingRight: 6 }}>
+                      {renderStepContent()}
+                    </div>
 
-                <div style={{ marginTop: 16 }}>
-                  <div className="divider" style={{ margin: "0 0 12px 0" }} />
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <button type="button" className="btn btnGhost" onClick={goBack} disabled={currentStepIdx === 0}>
-                      ← ย้อนกลับ
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn ${currentStepIdx === STEPS.length - 1 ? "btnGhost" : "btnPrimary"}`}
-                      onClick={goNext}
-                      disabled={currentStepIdx === STEPS.length - 1}
-                    >
-                      ถัดไป →
-                    </button>
+                    {renderStepNavButtons()}
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -2698,10 +2901,16 @@ const CSS = `
   align-content: start;
 }
 
+.stepAccordionItem{
+  display:grid;
+  gap:8px;
+}
+
 .stepItem{
   display: flex;
   align-items: center;
   gap: 10px;
+  width:100%;
   padding: 8px 10px;
   border-radius: 18px;
   border: 1px solid rgba(148,163,184,.22);
@@ -2742,9 +2951,29 @@ const CSS = `
 }
 
 .stepText{
+  flex:1;
+  min-width:0;
+  display:grid;
+  gap:2px;
   font-weight: 900;
   font-size: 12.5px;
   color: #0f172a;
+}
+
+.stepText small{
+  display:none;
+  font-size:11px;
+  line-height:1.25;
+  font-weight:800;
+  color:#64748b;
+}
+
+.stepChevron{
+  display:none;
+}
+
+.mobileStepPanel{
+  display:none;
 }
 
 .patternScroll{
@@ -2992,6 +3221,95 @@ const CSS = `
   min-width:88px;
 }
 
+.viewUnderPreview{
+  /* ✅ ขยับแถบปุ่มมุมมองใต้ภาพ 3D ให้ขึ้นใกล้กรอบพรีวิวมากขึ้น */
+  margin-top:2px;
+  padding:9px 10px;
+  border-radius:20px;
+  background:rgba(255,255,255,.80);
+  border:1px solid rgba(226,232,240,.92);
+  box-shadow:0 10px 24px rgba(15,23,42,.08);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+}
+
+.viewUnderPreviewHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:6px;
+}
+
+.viewUnderTitle{
+  font-size:13px;
+  font-weight:950;
+  color:#334155;
+  line-height:1.2;
+}
+
+.viewUnderHint{
+  margin-top:2px;
+  font-size:11px;
+  font-weight:750;
+  color:#64748b;
+}
+
+.viewUnderCurrent{
+  flex:0 0 auto;
+  padding:5px 9px;
+  border-radius:999px;
+  background:#eef2ff;
+  color:#4338ca;
+  font-size:11px;
+  font-weight:950;
+  white-space:nowrap;
+}
+
+.viewUnderGrid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:7px;
+}
+
+.viewUnderBtn{
+  min-height:40px;
+  border:1px solid rgba(255,255,255,.65);
+  border-radius:16px;
+  color:#ffffff;
+  cursor:pointer;
+  font-size:12px;
+  font-weight:950;
+  line-height:1.15;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  box-shadow:0 8px 18px rgba(15,23,42,.11);
+  transition:transform .12s ease, box-shadow .16s ease, filter .16s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+
+.viewUnderBtn.active{
+  border:2px solid rgba(255,255,255,.95);
+  box-shadow:0 12px 26px rgba(15,23,42,.18);
+}
+
+.viewUnderBtn:hover{
+  filter:saturate(1.05) brightness(1.02);
+  box-shadow:0 12px 24px rgba(15,23,42,.16);
+}
+
+.viewUnderBtn:active{
+  transform:scale(.97);
+}
+
+.viewUnderIcon{
+  display:inline-grid;
+  place-items:center;
+  min-width:16px;
+}
+
 .mockWithOverlay{
   position:relative;
 }
@@ -3108,6 +3426,121 @@ input[type="range"]{
     padding-right:0;
     gap:10px;
     min-height:0;
+  }
+
+  .config-card{
+    flex:none;
+  }
+
+  .config-layout{
+    display:block;
+  }
+
+  .stepper{
+    display:grid;
+    gap:9px;
+  }
+
+  .stepAccordionItem{
+    gap:0;
+    border-radius:20px;
+    /* scroll จริงคุมด้วย JS เพราะมี Preview ด้านบนเป็น sticky บนมือถือ */
+    scroll-margin-top:calc(var(--mobile-sticky-offset, 0px) + 14px);
+  }
+
+  .stepAccordionItem.accordionOpen{
+    background:linear-gradient(180deg, rgba(255,255,255,.92), rgba(248,250,252,.88));
+    box-shadow:0 14px 30px rgba(15,23,42,.10);
+  }
+
+  .stepItem{
+    min-height:54px;
+    padding:10px 11px;
+    border-radius:18px;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  .stepItem:hover{
+    transform:none;
+  }
+
+  .stepText{
+    font-size:13px;
+  }
+
+  .stepText small{
+    display:block;
+  }
+
+  .stepChevron{
+    display:grid;
+    place-items:center;
+    width:28px;
+    height:28px;
+    border-radius:999px;
+    background:rgba(255,255,255,.78);
+    color:#334155;
+    font-size:17px;
+    font-weight:900;
+    box-shadow:inset 0 0 0 1px rgba(148,163,184,.18);
+    flex:0 0 auto;
+  }
+
+  .mobileStepPanel{
+    display:block;
+    overflow:hidden;
+    transition:max-height .26s ease, opacity .2s ease, transform .2s ease;
+  }
+
+  .mobileStepPanel.open{
+    /* เปิด Accordion แล้วให้โชว์รายละเอียดเต็มทั้งหมด ไม่ตัดกลางทาง */
+    max-height:99999px;
+    opacity:1;
+    transform:translateY(0);
+  }
+
+  .mobileStepPanel.closed{
+    max-height:0;
+    opacity:0;
+    transform:translateY(-6px);
+    pointer-events:none;
+  }
+
+  .mobileStepPanelInner{
+    margin-top:8px;
+    padding:12px;
+    border-radius:20px;
+    background:rgba(255,255,255,.88);
+    border:1px solid rgba(226,232,240,.9);
+    /* ให้ความสูงตามเนื้อหาจริง แล้วเลื่อนทั้งหน้าแทน ไม่เลื่อนในกล่องเล็ก */
+    max-height:none;
+    overflow:visible;
+  }
+
+
+
+  .mobileViewAppendSlot{
+    margin:8px 0 4px;
+    padding:0 2px;
+  }
+
+  .mobileViewAccordionSelector{
+    margin-top: 8px;
+    margin-bottom: 12px;
+    border-radius: 18px;
+  }
+
+  .mobileStepPanelInner::-webkit-scrollbar{
+    width:6px;
+  }
+
+  .mobileStepPanelInner::-webkit-scrollbar-track{
+    background:transparent;
+  }
+
+  .mobileStepPanelInner::-webkit-scrollbar-thumb{
+    background:linear-gradient(180deg, #ff7ab6, #22d3ee);
+    border-radius:999px;
   }
 
   .left-card-top{
@@ -3240,6 +3673,30 @@ input[type="range"]{
     background:rgba(239,246,255,.96);
     color:#1d4ed8;
     box-shadow:0 10px 18px rgba(37,99,235,.16);
+  }
+}
+
+@media (max-width: 640px){
+  .viewUnderPreview{
+    margin-top:0;
+    padding:8px 9px;
+    border-radius:18px;
+  }
+
+  .viewUnderPreviewHead{
+    align-items:flex-start;
+    margin-bottom:7px;
+  }
+
+  .viewUnderGrid{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:7px;
+  }
+
+  .viewUnderBtn{
+    min-height:38px;
+    border-radius:14px;
+    font-size:11px;
   }
 }
 

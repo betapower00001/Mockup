@@ -1,12 +1,11 @@
 // src/components/LayoutPreview.tsx
 import React from "react";
 
-type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top";
-type MainViewName = "front" | "angle" | "top";
+type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top" | "bottom";
 
 interface LayoutPreviewProps {
-  view: MainViewName;
-  onSetView: (v: MainViewName) => void;
+  view: RenderViewName;
+  onSetView: (v: RenderViewName) => void;
   onDownload: () => void;
   onDownloadTop: () => void;
   onDownloadProductionSample: () => void;
@@ -22,21 +21,6 @@ const EXTRA_VIEWS: { key: RenderViewName; label: string; icon: string }[] = [
   { key: "back", label: "หลัง", icon: "⬇️" },
   { key: "top", label: "บน", icon: "🔝" },
 ];
-
-const mainBtn = (active: boolean, gradient: string, soft: string): React.CSSProperties => ({
-  padding: "12px 14px",
-  borderRadius: 16,
-  border: active ? "2px solid rgba(255,255,255,.95)" : "1px solid rgba(255,255,255,.65)",
-  background: active ? gradient : soft,
-  color: "#ffffff",
-  cursor: "pointer",
-  fontWeight: 900,
-  fontSize: 13,
-  boxShadow: active
-    ? "0 14px 28px rgba(15,23,42,.22)"
-    : "0 8px 18px rgba(15,23,42,.12)",
-  transition: "transform .16s ease, box-shadow .16s ease, filter .16s ease",
-});
 
 const downloadBtn = (gradient: string): React.CSSProperties => ({
   padding: "12px 14px",
@@ -65,40 +49,12 @@ const smallBtn: React.CSSProperties = {
 };
 
 export default function LayoutPreview({
-  view,
-  onSetView,
   onDownload,
   onDownloadA4,
   onDownloadView,
 }: LayoutPreviewProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <button
-          type="button"
-          onClick={() => onSetView("top")}
-          style={mainBtn(
-            view === "top",
-            "linear-gradient(135deg,#8b5cf6,#ec4899)",
-            "linear-gradient(135deg,#c084fc,#f472b6)"
-          )}
-        >
-          🔝 มุมบน
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onSetView("angle")}
-          style={mainBtn(
-            view === "angle",
-            "linear-gradient(135deg,#2563eb,#06b6d4)",
-            "linear-gradient(135deg,#60a5fa,#22d3ee)"
-          )}
-        >
-          🧊 มุมเอียง
-        </button>
-      </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <button
           type="button"
