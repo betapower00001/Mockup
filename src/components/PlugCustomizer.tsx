@@ -3384,6 +3384,49 @@ input[type="range"]{
   }
 }
 
+
+
+/* ✅ FIX: จอกลาง/จอใหญ่ที่ยังเข้า breakpoint 1180px
+   ป้องกันแถบมุมมองด้านล่างโดน card ที่สูงคงที่ตัดหาย */
+@media (min-width: 769px) and (max-width: 1180px){
+  .left-panel{
+    height:auto;
+    overflow:visible;
+  }
+
+  .left-card-top{
+    flex:0 0 auto;
+    min-height:0;
+  }
+
+  .left-card-top > .body{
+    flex:0 0 auto !important;
+    min-height:0;
+    overflow:visible;
+  }
+
+  .mock{
+    flex:0 0 auto;
+    height:clamp(360px, 52vw, 500px);
+    min-height:360px;
+    max-height:500px;
+  }
+
+  .viewUnderPreview{
+    flex:0 0 auto;
+    margin-top:10px;
+    overflow:visible;
+  }
+
+  .viewUnderGrid{
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+  }
+
+  .viewUnderBtn{
+    min-height:42px;
+  }
+}
+
 @media (max-width: 768px){
   .pc-wrap{
     height:auto;
