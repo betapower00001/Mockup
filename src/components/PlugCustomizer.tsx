@@ -2652,8 +2652,9 @@ function Slider({
 // ============================================
 const CSS = `
 .pc-wrap{
-  height: 100vh;
-  overflow: hidden;
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
   padding: 16px;
   box-sizing: border-box;
   background:
@@ -2684,26 +2685,29 @@ const CSS = `
   display: flex;
   flex-direction: column;
   gap: 16px;
-  height: 100%;
-  overflow-y: auto;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
   padding-right: 4px;
 }
 
 .left-card-top{
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 480px;
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .mock{
-  flex: 1;
+  flex: 0 0 auto;
   width: 100%;
+  height: clamp(300px, 42vh, 470px);
+  min-height: 300px;
+  max-height: 470px;
   border-radius: 24px;
   background: linear-gradient(180deg, #dff7ff, #fff4fb 48%, #f4fff2);
   border: 1px solid rgba(255,255,255,.72);
   overflow: hidden;
-  min-height: 350px;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.72);
 }
 
@@ -3310,36 +3314,6 @@ const CSS = `
   min-width:16px;
 }
 
-/* ✅ DESKTOP FIX: ให้แถบมุมมองใต้ Mockup แสดงครบ ไม่โดนตัดด้านล่าง
-   - เลิกบังคับให้การ์ด Mockup ยืดจนเนื้อหาล้น
-   - ลดความสูงภาพ 3D ลงเล็กน้อยในจอ Desktop/จอกลาง
-   - เปิด overflow เฉพาะการ์ด Mockup เพื่อไม่ให้ viewUnderPreview ถูกตัด */
-.card.left-card-top{
-  flex:0 0 auto;
-  min-height:0;
-  overflow:visible;
-}
-
-.left-card-top > .body{
-  flex:0 0 auto !important;
-  min-height:0;
-  overflow:visible;
-}
-
-.left-card-top .mock{
-  flex:0 0 auto;
-  height:clamp(300px, 42vh, 520px);
-  min-height:300px;
-  max-height:520px;
-}
-
-.left-card-top .viewUnderPreview{
-  flex:0 0 auto;
-  margin-top:8px;
-  margin-bottom:0;
-  overflow:visible;
-}
-
 .mockWithOverlay{
   position:relative;
 }
@@ -3353,9 +3327,185 @@ input[type="range"]{
   accent-color: #ec4899;
 }
 
-@media (max-width: 1380px){
+
+
+/* ✅ DESKTOP COMPACT: ให้ Mockup + แถบมุมมอง + Quick Actions เห็นครบ ไม่โดนตัด/ไม่หาย */
+@media (min-width: 769px){
+  .pc-wrap{
+    height:auto;
+    min-height:100vh;
+    overflow:auto;
+  }
+
+  .pc-grid{
+    min-height:0;
+    align-items:start;
+  }
+
+  .left-panel{
+    height:auto;
+    min-height:0;
+    overflow:visible;
+  }
+
+  .left-card-top{
+    flex:0 0 auto;
+    min-height:0;
+  }
+
+  .left-card-top > .body{
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    overflow:visible;
+  }
+
+  .mock{
+    flex:0 0 auto;
+    height:clamp(280px, 40vh, 450px);
+    min-height:280px;
+    max-height:450px;
+  }
+
+  .viewUnderPreview{
+    margin-top:8px;
+    padding:8px 10px;
+    border-radius:18px;
+    overflow:visible;
+  }
+
+  .viewUnderPreviewHead{
+    margin-bottom:6px;
+  }
+
+  .viewUnderGrid{
+    grid-template-columns:repeat(6, minmax(0, 1fr));
+    gap:7px;
+  }
+
+  .viewUnderBtn{
+    min-height:38px;
+    border-radius:15px;
+    font-size:12px;
+    padding:6px 8px;
+  }
+
+  .quickActionsCard .head{
+    padding:9px 12px;
+  }
+
+  .quickActionsCard .body{
+    padding:10px 12px;
+  }
+
+  .qa-stack{
+    gap:10px;
+  }
+
+  .qa-toolbar,
+  .qa-toolbarGroup{
+    gap:8px;
+  }
+
+  .qa-colorSection{
+    gap:8px;
+  }
+
+  .qa-sectionHead{
+    align-items:center;
+    gap:10px;
+  }
+
+  .qa-sectionHead .hint{
+    margin-top:2px !important;
+    line-height:1.25;
+  }
+
+  .qa-colorGrid{
+    gap:10px;
+  }
+
+  .qa-colorGrid.double{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+
+  .qa-colorGrid.triple{
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+  }
+
+  .qa-colorCard{
+    padding:10px;
+    border-radius:18px;
+  }
+
+  .qa-colorTop{
+    gap:8px;
+  }
+
+  .qa-colorTitle{
+    font-size:12.5px;
+  }
+
+  .qa-colorSub{
+    margin-top:2px;
+    font-size:11px;
+    line-height:1.25;
+  }
+
+  .qa-colorBadge{
+    padding:5px 8px;
+    font-size:10.5px;
+  }
+
+  .qa-colorRow{
+    margin-top:9px;
+    gap:8px;
+    flex-wrap:nowrap;
+  }
+
+  .qa-colorPickerGroup{
+    gap:8px;
+    flex-wrap:nowrap;
+  }
+
+  .qa-colorInputWrap{
+    width:44px;
+    height:44px;
+    border-radius:14px;
+  }
+
+  .qa-colorPreview{
+    inset:5px;
+    border-radius:10px;
+  }
+
+  .qa-colorMetaLabel{
+    font-size:10.5px;
+  }
+
+  .qa-colorMetaValue{
+    font-size:12px;
+  }
+
+  .qa-smallBtn{
+    min-width:72px;
+    padding:6px 10px;
+  }
+
+  .divider{
+    margin:8px 0;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 980px){
   .qa-colorGrid.triple{
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 981px) and (max-width: 1380px){
+  .qa-colorGrid.triple{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -3390,7 +3540,9 @@ input[type="range"]{
   }
 
   .mock{
-    min-height: 400px;
+    height:clamp(280px, 34vw, 390px);
+    min-height:280px;
+    max-height:390px;
   }
 }
 
@@ -3416,18 +3568,17 @@ input[type="range"]{
 
 
 
-/* ✅ FIX: จอกลาง/จอ Desktop ที่เป็น 1 คอลัมน์
-   ลดภาพ 3D และทำแถบมุมมองให้เตี้ยลง เพื่อให้เห็นปุ่มครบทุกปุ่ม */
+/* ✅ FIX: จอกลาง/จอใหญ่ที่ยังเข้า breakpoint 1180px
+   ป้องกันแถบมุมมองด้านล่างโดน card ที่สูงคงที่ตัดหาย */
 @media (min-width: 769px) and (max-width: 1180px){
   .left-panel{
     height:auto;
     overflow:visible;
   }
 
-  .card.left-card-top{
+  .left-card-top{
     flex:0 0 auto;
     min-height:0;
-    overflow:visible;
   }
 
   .left-card-top > .body{
@@ -3436,34 +3587,81 @@ input[type="range"]{
     overflow:visible;
   }
 
-  .left-card-top .mock{
+  .mock{
     flex:0 0 auto;
-    height:clamp(280px, 36vw, 360px);
-    min-height:280px;
-    max-height:360px;
+    height:clamp(270px, 34vw, 390px);
+    min-height:270px;
+    max-height:390px;
   }
 
-  .left-card-top .viewUnderPreview{
+  .viewUnderPreview{
     flex:0 0 auto;
-    margin-top:8px;
-    padding:8px 10px;
+    margin-top:10px;
     overflow:visible;
   }
 
-  .left-card-top .viewUnderPreviewHead{
-    margin-bottom:5px;
-  }
-
-  .left-card-top .viewUnderGrid{
+  .viewUnderGrid{
     grid-template-columns:repeat(6, minmax(0, 1fr));
-    gap:7px;
   }
 
-  .left-card-top .viewUnderBtn{
-    min-height:38px;
-    border-radius:15px;
+  .viewUnderBtn{
+    min-height:42px;
+  }
+}
+
+
+
+@media (min-width: 769px) and (max-width: 1180px){
+  .viewUnderGrid{
+    grid-template-columns:repeat(6, minmax(0, 1fr));
+  }
+
+  .viewUnderBtn{
+    min-height:36px;
     font-size:11.5px;
-    gap:4px;
+    padding:5px 6px;
+  }
+
+  .quickActionsCard{
+    overflow:visible;
+  }
+
+  .qa-colorGrid.double,
+  .qa-colorGrid.triple{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+
+  .qa-colorCard{
+    padding:9px;
+  }
+}
+
+@media (min-width: 1181px) and (max-height: 820px){
+  .mock{
+    height:clamp(260px, 36vh, 360px);
+    min-height:260px;
+    max-height:360px;
+  }
+
+  .viewUnderPreview{
+    padding:7px 10px;
+  }
+
+  .viewUnderBtn{
+    min-height:34px;
+  }
+
+  .quickActionsCard .body{
+    padding:9px 12px;
+  }
+
+  .qa-colorCard{
+    padding:9px;
+  }
+
+  .qa-colorInputWrap{
+    width:40px;
+    height:40px;
   }
 }
 
