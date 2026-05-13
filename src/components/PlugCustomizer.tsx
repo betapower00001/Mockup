@@ -3310,6 +3310,36 @@ const CSS = `
   min-width:16px;
 }
 
+/* ✅ DESKTOP FIX: ให้แถบมุมมองใต้ Mockup แสดงครบ ไม่โดนตัดด้านล่าง
+   - เลิกบังคับให้การ์ด Mockup ยืดจนเนื้อหาล้น
+   - ลดความสูงภาพ 3D ลงเล็กน้อยในจอ Desktop/จอกลาง
+   - เปิด overflow เฉพาะการ์ด Mockup เพื่อไม่ให้ viewUnderPreview ถูกตัด */
+.card.left-card-top{
+  flex:0 0 auto;
+  min-height:0;
+  overflow:visible;
+}
+
+.left-card-top > .body{
+  flex:0 0 auto !important;
+  min-height:0;
+  overflow:visible;
+}
+
+.left-card-top .mock{
+  flex:0 0 auto;
+  height:clamp(300px, 42vh, 520px);
+  min-height:300px;
+  max-height:520px;
+}
+
+.left-card-top .viewUnderPreview{
+  flex:0 0 auto;
+  margin-top:8px;
+  margin-bottom:0;
+  overflow:visible;
+}
+
 .mockWithOverlay{
   position:relative;
 }
@@ -3386,17 +3416,18 @@ input[type="range"]{
 
 
 
-/* ✅ FIX: จอกลาง/จอใหญ่ที่ยังเข้า breakpoint 1180px
-   ป้องกันแถบมุมมองด้านล่างโดน card ที่สูงคงที่ตัดหาย */
+/* ✅ FIX: จอกลาง/จอ Desktop ที่เป็น 1 คอลัมน์
+   ลดภาพ 3D และทำแถบมุมมองให้เตี้ยลง เพื่อให้เห็นปุ่มครบทุกปุ่ม */
 @media (min-width: 769px) and (max-width: 1180px){
   .left-panel{
     height:auto;
     overflow:visible;
   }
 
-  .left-card-top{
+  .card.left-card-top{
     flex:0 0 auto;
     min-height:0;
+    overflow:visible;
   }
 
   .left-card-top > .body{
@@ -3405,25 +3436,34 @@ input[type="range"]{
     overflow:visible;
   }
 
-  .mock{
+  .left-card-top .mock{
     flex:0 0 auto;
-    height:clamp(360px, 52vw, 500px);
-    min-height:360px;
-    max-height:500px;
+    height:clamp(280px, 36vw, 360px);
+    min-height:280px;
+    max-height:360px;
   }
 
-  .viewUnderPreview{
+  .left-card-top .viewUnderPreview{
     flex:0 0 auto;
-    margin-top:10px;
+    margin-top:8px;
+    padding:8px 10px;
     overflow:visible;
   }
 
-  .viewUnderGrid{
-    grid-template-columns:repeat(3, minmax(0, 1fr));
+  .left-card-top .viewUnderPreviewHead{
+    margin-bottom:5px;
   }
 
-  .viewUnderBtn{
-    min-height:42px;
+  .left-card-top .viewUnderGrid{
+    grid-template-columns:repeat(6, minmax(0, 1fr));
+    gap:7px;
+  }
+
+  .left-card-top .viewUnderBtn{
+    min-height:38px;
+    border-radius:15px;
+    font-size:11.5px;
+    gap:4px;
   }
 }
 
