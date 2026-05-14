@@ -116,9 +116,14 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     top: [
       { label: "ขาว", value: "#ffffff" },
       { label: "ดำ", value: "#111111" },
-      { label: "เทาอ่อน", value: "#d9d9d9" },
-      { label: "กรม", value: "#1e293b" },
-      { label: "เบจ", value: "#d6c2a1" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
     ],
     bottom: [
       { label: "ขาว", value: "#ffffff" },
@@ -137,10 +142,15 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
   "TYPE-2": {
     top: [
       { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
       { label: "กรมท่า", value: "#1e266a" },
       { label: "ฟ้าพาสเทล", value: "#59c5c7" },
       { label: "เขียวพาสเทล", value: "#62c2a6" },
       { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
     ],
     bottom: [
       { label: "ขาว", value: "#ffffff" },
@@ -156,10 +166,15 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     ],
     switch: [
       { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
       { label: "กรมท่า", value: "#1e266a" },
       { label: "ฟ้าพาสเทล", value: "#59c5c7" },
       { label: "เขียวพาสเทล", value: "#62c2a6" },
       { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
     ],
   },
 
@@ -167,8 +182,14 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     top: [
       { label: "ขาว", value: "#ffffff" },
       { label: "ดำ", value: "#111111" },
-      { label: "เทาเข้ม", value: "#7a7a7a" },
-      { label: "กรม", value: "#1e293b" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
+      { label: "กรมท่า", value: "#1e266a" },
+      { label: "ฟ้าพาสเทล", value: "#59c5c7" },
+      { label: "เขียวพาสเทล", value: "#62c2a6" },
+      { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
     ],
     bottom: [
       { label: "ขาว", value: "#ffffff" },
@@ -192,10 +213,15 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
   "TYPE-5": {
     top: [
       { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
       { label: "กรมท่า", value: "#1e266a" },
       { label: "ฟ้าพาสเทล", value: "#59c5c7" },
       { label: "เขียวพาสเทล", value: "#62c2a6" },
       { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
     ],
     bottom: [
       { label: "ขาว", value: "#ffffff" },
@@ -211,10 +237,15 @@ const COLOR_OPTIONS_BY_TYPE: Record<string, ColorOptionsByPart> = {
     ],
     switch: [
       { label: "ขาว", value: "#ffffff" },
+      { label: "ดำ", value: "#111111" },
+      { label: "ส้ม", value: "#ec3b27" },
+      { label: "แดง", value: "#ff000b" },
       { label: "กรมท่า", value: "#1e266a" },
       { label: "ฟ้าพาสเทล", value: "#59c5c7" },
       { label: "เขียวพาสเทล", value: "#62c2a6" },
       { label: "เหลือง", value: "#ffc813" },
+      { label: "ชมพู", value: "#f37c8f" },
+      { label: "ม่วงพาสเทล", value: "#9363a1" },
     ],
   },
 
@@ -248,49 +279,49 @@ const VIEW_BUTTONS: {
   gradient: string;
   soft: string;
 }[] = [
-  {
-    key: "top",
-    label: "มุมบน",
-    icon: "↟",
-    gradient: "linear-gradient(135deg,#8b5cf6,#ec4899)",
-    soft: "linear-gradient(135deg,#a855f7,#ec4899)",
-  },
-  {
-    key: "front",
-    label: "ด้านหน้า",
-    icon: "↥",
-    gradient: "linear-gradient(135deg,#f97316,#ef4444)",
-    soft: "linear-gradient(135deg,#fb923c,#f87171)",
-  },
-  {
-    key: "back",
-    label: "ด้านหลัง",
-    icon: "↧",
-    gradient: "linear-gradient(135deg,#64748b,#334155)",
-    soft: "linear-gradient(135deg,#94a3b8,#64748b)",
-  },
-  {
-    key: "left",
-    label: "ด้านซ้าย",
-    icon: "↤",
-    gradient: "linear-gradient(135deg,#22c55e,#14b8a6)",
-    soft: "linear-gradient(135deg,#4ade80,#2dd4bf)",
-  },
-  {
-    key: "right",
-    label: "ด้านขวา",
-    icon: "↦",
-    gradient: "linear-gradient(135deg,#06b6d4,#6366f1)",
-    soft: "linear-gradient(135deg,#22d3ee,#818cf8)",
-  },
-  {
-    key: "bottom",
-    label: "ด้านล่าง",
-    icon: "↡",
-    gradient: "linear-gradient(135deg,#7c3aed,#2563eb)",
-    soft: "linear-gradient(135deg,#a78bfa,#60a5fa)",
-  },
-];
+    {
+      key: "top",
+      label: "มุมบน",
+      icon: "↟",
+      gradient: "linear-gradient(135deg,#8b5cf6,#ec4899)",
+      soft: "linear-gradient(135deg,#a855f7,#ec4899)",
+    },
+    {
+      key: "front",
+      label: "ด้านหน้า",
+      icon: "↥",
+      gradient: "linear-gradient(135deg,#f97316,#ef4444)",
+      soft: "linear-gradient(135deg,#fb923c,#f87171)",
+    },
+    {
+      key: "back",
+      label: "ด้านหลัง",
+      icon: "↧",
+      gradient: "linear-gradient(135deg,#64748b,#334155)",
+      soft: "linear-gradient(135deg,#94a3b8,#64748b)",
+    },
+    {
+      key: "left",
+      label: "ด้านซ้าย",
+      icon: "↤",
+      gradient: "linear-gradient(135deg,#22c55e,#14b8a6)",
+      soft: "linear-gradient(135deg,#4ade80,#2dd4bf)",
+    },
+    {
+      key: "right",
+      label: "ด้านขวา",
+      icon: "↦",
+      gradient: "linear-gradient(135deg,#06b6d4,#6366f1)",
+      soft: "linear-gradient(135deg,#22d3ee,#818cf8)",
+    },
+    {
+      key: "bottom",
+      label: "ด้านล่าง",
+      icon: "↡",
+      gradient: "linear-gradient(135deg,#7c3aed,#2563eb)",
+      soft: "linear-gradient(135deg,#a78bfa,#60a5fa)",
+    },
+  ];
 
 function normalizeHex(hex?: string) {
   if (!hex) return hex;
