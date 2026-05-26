@@ -1,7 +1,15 @@
 // src/components/LayoutPreview.tsx
 import React from "react";
 
-type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top" | "bottom";
+type RenderViewName =
+  | "front"
+  | "angle"
+  | "left"
+  | "right"
+  | "back"
+  | "top"
+  | "bottom"
+  | "topRight";
 
 interface LayoutPreviewProps {
   view: RenderViewName;
@@ -12,15 +20,6 @@ interface LayoutPreviewProps {
   onDownloadA4: () => void;
   onDownloadView: (view: RenderViewName) => void;
 }
-
-const EXTRA_VIEWS: { key: RenderViewName; label: string; icon: string }[] = [
-  { key: "front", label: "หน้า", icon: "⬆️" },
-  { key: "angle", label: "เอียง", icon: "🧊" },
-  { key: "left", label: "ซ้าย", icon: "⬅️" },
-  { key: "right", label: "ขวา", icon: "➡️" },
-  { key: "back", label: "หลัง", icon: "⬇️" },
-  { key: "top", label: "บน", icon: "🔝" },
-];
 
 const downloadBtn = (gradient: string): React.CSSProperties => ({
   padding: "12px 14px",
@@ -35,33 +34,42 @@ const downloadBtn = (gradient: string): React.CSSProperties => ({
   transition: "transform .16s ease, box-shadow .16s ease, filter .16s ease",
 });
 
-const smallBtn: React.CSSProperties = {
-  padding: "10px 8px",
-  borderRadius: 13,
-  border: "1px solid #e5e7eb",
-  background: "linear-gradient(180deg,#ffffff,#f8fafc)",
-  color: "#0f172a",
-  cursor: "pointer",
-  fontWeight: 850,
-  fontSize: 12,
-  boxShadow: "0 6px 14px rgba(15,23,42,.08)",
-  transition: "transform .16s ease, box-shadow .16s ease",
-};
-
 export default function LayoutPreview({
-  onDownload,
+  onDownloadTop,
   onDownloadA4,
   onDownloadView,
 }: LayoutPreviewProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+          gap: 8,
+        }}
+      >
         <button
           type="button"
-          onClick={onDownload}
+          onClick={onDownloadTop}
+          style={downloadBtn("linear-gradient(135deg,#8b5cf6,#ec4899)")}
+        >
+          🔝 โหลดมุมบน
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onDownloadView("angle")}
           style={downloadBtn("linear-gradient(135deg,#f97316,#ef4444)")}
         >
-          📥 ดาวน์โหลดภาพ
+          🧊 โหลดมุมเอียง
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onDownloadView("topRight")}
+          style={downloadBtn("linear-gradient(135deg,#06b6d4,#6366f1)")}
+        >
+          ↗️ โหลดบนเอียงขวา
         </button>
 
         <button
@@ -71,35 +79,6 @@ export default function LayoutPreview({
         >
           📄 ดาวน์โหลด A4
         </button>
-      </div>
-
-      <div
-        style={{
-          padding: 12,
-          borderRadius: 18,
-          border: "1px solid rgba(255,255,255,.72)",
-          background: "rgba(255,255,255,.78)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          boxShadow: "0 12px 30px rgba(15,23,42,.10)",
-        }}
-      >
-        <div style={{ fontWeight: 900, marginBottom: 8, color: "#334155", fontSize: 13 }}>
-          📐 ดาวน์โหลดแยกแต่ละมุม
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
-          {EXTRA_VIEWS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => onDownloadView(item.key)}
-              style={smallBtn}
-            >
-              {item.icon} {item.label}
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );

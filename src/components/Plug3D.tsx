@@ -2,19 +2,18 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { Environment, OrbitControls, useGLTF, useTexture, Center } from "@react-three/drei";
 import { suspend } from "suspend-react";
 import * as THREE from "three";
 import type { PlugModelConfig, ColorKey, UVProjection, UVSpace } from "../data/plugConfig";
-import type { LogoTransform } from "./PlugCustomizer";
 // ✅ เอา FitToObject ออกจากการ Import ก็ได้ครับ (หรือปล่อยไว้ถ้าใช้ที่อื่น)
 // import FitToObject from "./FitToObject"; 
 import { useStickerTexture } from "./useStickerTexture";
 
 const cityEnv = import("@pmndrs/assets/hdri/city.exr").then((m) => m.default);
 
-export type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top" | "bottom";
+export type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top" | "bottom" | "topRight";
 
 export type PlugRenderOptions = {
   transparent?: boolean;
@@ -30,6 +29,13 @@ export type PatternTransform = {
   x: number; // 0..1
   y: number; // 0..1
   zoom: number; // 1.. (>=1 recommended)
+};
+
+export type LogoTransform = {
+  x: number;
+  y: number;
+  scale: number;
+  rot: number;
 };
 
 export type LogoItem = {
@@ -60,6 +66,7 @@ type Plug3DProps = {
   onRenderReady?: (render: PlugRenderFn) => void;
   orbitNudgeDirection?: OrbitNudgeDirection;
   orbitNudgeTick?: number;
+  onAngleDebugChange?: (debug: AngleDebugInfo | null) => void;
 };
 
 // ----------------------------------------------------
@@ -89,7 +96,200 @@ class EnvErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
 type CameraPose = {
   position: THREE.Vector3;
   target: THREE.Vector3;
+  // ใช้เฉพาะมุมที่ต้องล็อกทิศให้ตั้งตรง เช่น มุมบนเอียงขวา
+  up?: THREE.Vector3;
+  // หมุนภาพในเฟรม เฉพาะมุมที่ต้องชดเชยเป็นราย TYPE
+  roll?: number;
 };
+
+export type AngleDebugInfo = {
+  type: string;
+  view: RenderViewName;
+  sceneDir: [number, number, number];
+  sceneYaw: number;
+  sceneElevation: number;
+  exportDir: [number, number, number];
+  exportYaw: number;
+  exportElevation: number;
+  exportMul: number;
+  roll: number;
+  up: [number, number, number];
+};
+
+function roundAngleDebugValue(v: number) {
+  return Number.isFinite(v) ? Number(v.toFixed(4)) : 0;
+}
+
+function vectorToDebugTuple(v: THREE.Vector3): [number, number, number] {
+  return [roundAngleDebugValue(v.x), roundAngleDebugValue(v.y), roundAngleDebugValue(v.z)];
+}
+
+function getDirAnglesDeg(dir: THREE.Vector3) {
+  const d = dir.clone().normalize();
+  const yaw = THREE.MathUtils.radToDeg(Math.atan2(d.x, d.z));
+  const flat = Math.sqrt(d.x * d.x + d.z * d.z);
+  const elevation = THREE.MathUtils.radToDeg(Math.atan2(d.y, flat));
+  return {
+    yaw: roundAngleDebugValue(yaw),
+    elevation: roundAngleDebugValue(elevation),
+  };
+}
+
+// ======================================================
+// ✅ ปรับมุม topRight แยกตาม TYPE ได้ตรงนี้
+// ------------------------------------------------------
+// x: ซ้าย/ขวา | y: สูง/ต่ำ | z: หน้า/หลัง
+// TYPE-5 เริ่มจากค่าที่หมุนเองและอ่านจาก 3D Angle Debug
+// ======================================================
+type TopRightDir = readonly [number, number, number];
+type TopRightUp = readonly [number, number, number];
+
+const TOP_RIGHT_DEFAULT_SCENE_DIR: TopRightDir = [-0.82, 1.55, 0.42];
+const TOP_RIGHT_DEFAULT_EXPORT_DIR: TopRightDir = [-0.82, 1.72, 0.42];
+const TOP_RIGHT_DEFAULT_EXPORT_MUL = 1.04;
+const TOP_RIGHT_DEFAULT_UP: TopRightUp = [0, 0, 1];
+const TOP_RIGHT_DEFAULT_ROLL = 0;
+
+const TOP_RIGHT_SCENE_DIR_BY_TYPE: Partial<Record<string, TopRightDir>> = {
+  "TYPE-1": [-1.25, 1.35, 0.55],
+  "TYPE-2": [-0.459, 0.66, -0.594],
+  "TYPE-3": [-0.614, 0.686, -0.39],
+  "TYPE-4": [-0.645, 0.634, -0.426],
+  "TYPE-5": [-0.621, 0.647, -0.442],
+};
+
+const TOP_RIGHT_EXPORT_DIR_BY_TYPE: Partial<Record<string, TopRightDir>> = {
+  "TYPE-1": [-1.25, 1.50, 0.55],
+  "TYPE-2": [-0.459, 0.66, -0.594],
+  "TYPE-3": [-0.614, 0.686, -0.39],
+  "TYPE-4": [-0.645, 0.634, -0.426],
+  "TYPE-5": [-0.621, 0.647, -0.442],
+};
+
+const TOP_RIGHT_EXPORT_MUL_BY_TYPE: Partial<Record<string, number>> = {
+  "TYPE-1": 1.04,
+  "TYPE-2": 1.02,
+  "TYPE-3": 1.02,
+  "TYPE-4": 1.02,
+  "TYPE-5": 1.02,
+};
+
+const TOP_RIGHT_UP_BY_TYPE: Partial<Record<string, TopRightUp>> = {
+  "TYPE-2": [0, 1, 0],
+  "TYPE-3": [0, 1, 0],
+  "TYPE-4": [0, 1, 0],
+  "TYPE-5": [0, 1, 0],
+};
+
+const TOP_RIGHT_ROLL_BY_TYPE: Partial<Record<string, number>> = {
+  "TYPE-2": 0,
+  "TYPE-3": 0,
+  "TYPE-4": 0,
+  "TYPE-5": 0,
+};
+
+function getTopRightSceneDir(configId?: string): TopRightDir {
+  if (!configId) return TOP_RIGHT_DEFAULT_SCENE_DIR;
+  return TOP_RIGHT_SCENE_DIR_BY_TYPE[configId] ?? TOP_RIGHT_DEFAULT_SCENE_DIR;
+}
+
+function getTopRightExportDir(configId?: string): TopRightDir {
+  if (!configId) return TOP_RIGHT_DEFAULT_EXPORT_DIR;
+  return TOP_RIGHT_EXPORT_DIR_BY_TYPE[configId] ?? TOP_RIGHT_DEFAULT_EXPORT_DIR;
+}
+
+function getTopRightExportMul(configId?: string) {
+  if (!configId) return TOP_RIGHT_DEFAULT_EXPORT_MUL;
+  return TOP_RIGHT_EXPORT_MUL_BY_TYPE[configId] ?? TOP_RIGHT_DEFAULT_EXPORT_MUL;
+}
+
+function getTopRightUp(configId?: string): TopRightUp {
+  if (!configId) return TOP_RIGHT_DEFAULT_UP;
+  return TOP_RIGHT_UP_BY_TYPE[configId] ?? TOP_RIGHT_DEFAULT_UP;
+}
+
+function getTopRightRoll(configId?: string) {
+  if (!configId) return TOP_RIGHT_DEFAULT_ROLL;
+  return TOP_RIGHT_ROLL_BY_TYPE[configId] ?? TOP_RIGHT_DEFAULT_ROLL;
+}
+
+function getExportMulForDebug(view: RenderViewName, configId?: string) {
+  switch (view) {
+    case "left":
+    case "right":
+    case "top":
+    case "bottom":
+      return 1.02;
+    case "topRight":
+      return getTopRightExportMul(configId);
+    default:
+      return 1.0;
+  }
+}
+
+function buildLiveAngleDebugInfo(args: {
+  configId: string;
+  view: RenderViewName;
+  camera: THREE.Camera;
+  controls?: any;
+}): AngleDebugInfo {
+  const { configId, view, camera, controls } = args;
+  const target = controls?.target instanceof THREE.Vector3
+    ? controls.target
+    : new THREE.Vector3(0, 0, 0);
+
+  const liveDir = new THREE.Vector3().copy(camera.position).sub(target);
+  if (liveDir.lengthSq() < 1e-10) liveDir.set(0, 0.1, 1);
+
+  const normalizedDir = liveDir.clone().normalize();
+  const angles = getDirAnglesDeg(normalizedDir);
+  const up = camera.up.clone().normalize();
+
+  // exportDir ใช้ค่า live เดียวกัน เพื่อให้ copy ไปตั้งมุม export ได้ตรงกับมุมที่กำลังหมุนอยู่
+  return {
+    type: configId,
+    view,
+    sceneDir: vectorToDebugTuple(normalizedDir),
+    sceneYaw: angles.yaw,
+    sceneElevation: angles.elevation,
+    exportDir: vectorToDebugTuple(normalizedDir),
+    exportYaw: angles.yaw,
+    exportElevation: angles.elevation,
+    exportMul: getExportMulForDebug(view, configId),
+    roll: 0,
+    up: vectorToDebugTuple(up),
+  };
+}
+
+function AngleDebugReporter({
+  configId,
+  view,
+  onChange,
+}: {
+  configId: string;
+  view: RenderViewName;
+  onChange?: (debug: AngleDebugInfo | null) => void;
+}) {
+  const { camera, controls } = useThree() as any;
+  const lastSignatureRef = useRef("");
+
+  useFrame(() => {
+    if (!onChange) return;
+
+    const debug = buildLiveAngleDebugInfo({ configId, view, camera, controls });
+    const signature = JSON.stringify(debug);
+    if (signature === lastSignatureRef.current) return;
+
+    lastSignatureRef.current = signature;
+    onChange(debug);
+  });
+
+  useEffect(() => {
+    return () => onChange?.(null);
+  }, [onChange]);
+
+  return null;
+}
 
 function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName, configId?: string): CameraPose {
   const box = new THREE.Box3().setFromObject(object);
@@ -100,16 +300,10 @@ function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCam
   const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
   const fitDist = (safeMax * 0.75) / Math.max(Math.tan(halfFov), 0.01);
 
-  // ✅ 2. ตั้งค่าระยะห่างแยกตามรุ่น (เลขยิ่งมาก กล้องยิ่งถอยออกไปไกล)
-  let zoomMultiplier = 1.0; // ระยะเริ่มต้น
+  // ✅ ใช้ระยะเปิดหน้า 3D แบบไฟล์แรก: ไม่ถอยกล้องแยกตาม TYPE
+  // เพื่อให้ตอนเปิดเข้ามาได้สเกล/ระยะเดิม แต่ยังคงฟังก์ชัน topRight ราย TYPE ไว้
+  const zoomMultiplier = 1.0;
 
-  if (configId === "TYPE-1") {
-    zoomMultiplier = 1.8; // 👈 ปรับตรงนี้ให้ TYPE-1 ถอยไกลขึ้น (ลองเปลี่ยนเป็น 1.5, 2.0 ได้ตามชอบ)
-  } else if (configId === "TYPE-2") {
-    zoomMultiplier = 1.0; // TYPE อื่นๆ ก็ใส่เพิ่มดักไว้ได้ครับ
-  }
-
-  // ✅ 3. เอาตัวคูณไปคูณกับ fitDist
   const dist = Math.max(fitDist * zoomMultiplier, 0.1);
 
   const lift = Math.max(size.y * 0.1, safeMax * 0.03);
@@ -135,6 +329,10 @@ function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCam
     case "top":
       dir = new THREE.Vector3(0, 1.45, -0.001);
       break;
+    case "topRight":
+      // มุมบนเอียงขวา: ปรับแยกตาม TYPE ได้ที่ TOP_RIGHT_SCENE_DIR_BY_TYPE
+      dir = new THREE.Vector3(...getTopRightSceneDir(configId));
+      break;
     case "bottom":
       dir = new THREE.Vector3(0, -1.45, 0.001);
       break;
@@ -143,10 +341,20 @@ function getSceneCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCam
   const position = center.clone().add(dir.normalize().multiplyScalar(dist));
   position.y += lift;
 
+  if (view === "topRight") {
+    // ใช้ up/roll แยกตาม TYPE เพื่อจูนแต่ละรุ่นโดยไม่กระทบรุ่นอื่น
+    return {
+      position,
+      target,
+      up: new THREE.Vector3(...getTopRightUp(configId)),
+      roll: getTopRightRoll(configId),
+    };
+  }
+
   return { position, target };
 }
 
-function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName): CameraPose {
+function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCamera, view: RenderViewName, configId?: string): CameraPose {
   const box = new THREE.Box3().setFromObject(object);
   const center = new THREE.Vector3(0, 0, 0);
   const size = box.getSize(new THREE.Vector3());
@@ -190,6 +398,11 @@ function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCa
       dir = new THREE.Vector3(0, 1.7, -0.04);
       mul = 1.02;
       break;
+    case "topRight":
+      // มุมดาวน์โหลดบนเอียงขวา: ปรับแยกตาม TYPE ได้ที่ TOP_RIGHT_EXPORT_DIR_BY_TYPE
+      dir = new THREE.Vector3(...getTopRightExportDir(configId));
+      mul = getTopRightExportMul(configId);
+      break;
     case "bottom":
       dir = new THREE.Vector3(0, -1.7, 0.04);
       mul = 1.02;
@@ -198,6 +411,17 @@ function getExportCameraPose(object: THREE.Object3D, camera: THREE.PerspectiveCa
 
   const position = center.clone().add(dir.normalize().multiplyScalar(dist * mul));
   position.y += lift;
+
+  if (view === "topRight") {
+    // ใช้ up/roll แยกตาม TYPE เพื่อจูนแต่ละรุ่นโดยไม่กระทบรุ่นอื่น
+    return {
+      position,
+      target,
+      up: new THREE.Vector3(...getTopRightUp(configId)),
+      roll: getTopRightRoll(configId),
+    };
+  }
+
   return { position, target };
 }
 
@@ -261,9 +485,16 @@ function renderSceneToDataURL(args: {
 }
 
 function applyCameraPose(camera: THREE.PerspectiveCamera, pose: CameraPose) {
+  camera.up.copy(pose.up ?? new THREE.Vector3(0, 1, 0));
   camera.position.copy(pose.position);
   camera.lookAt(pose.target);
+
+  if (pose.roll) {
+    camera.rotateZ(THREE.MathUtils.degToRad(pose.roll));
+  }
+
   camera.updateProjectionMatrix();
+  camera.updateMatrixWorld(true);
 }
 
 function normalizeTargetNames(names?: string[]) {
@@ -1090,7 +1321,8 @@ function LogoLayer({
   logo: LogoItem;
   index: number;
 }) {
-  // ✅ แยก TYPE-2 ออกมา เพื่อแก้เฉพาะ TYPE-2 ไม่ให้กระทบ TYPE อื่น
+  // ✅ TYPE-2 ให้ใช้ระบบวางโลโก้แบบเดียวกับ TYPE-5
+  // ไม่ใช้ PlaneGeometry แยกแล้ว เพื่อให้โลโก้ติดผิววัตถุเหมือน TYPE-5
   const isType2 = config.id === "TYPE-2";
   const isType3 = isType2 || config.id === "TYPE-3" || config.id === "TYPE-5";
   const isType4 = config.id === "TYPE-4";
@@ -1123,8 +1355,17 @@ function LogoLayer({
     if (!logoMesh || !logo.url || !stickerTex) return;
 
     const overlayName = `__LOGO_OVERLAY_${logo.id}__`;
-    const old = logoMesh.getObjectByName(overlayName);
-    if (old) old.parent?.remove(old);
+    const old = logoMesh.getObjectByName(overlayName) as THREE.Mesh | null;
+    if (old) {
+      old.parent?.remove(old);
+
+      // ✅ เผื่อเคยโหลดไฟล์เวอร์ชัน PlaneGeometry ก่อนหน้าไว้ใน hot reload
+      // จะล้าง geometry เก่าเฉพาะอันที่เราสร้างเองเท่านั้น
+      if ((old.geometry as any)?.userData?.__type2LogoPlane) old.geometry.dispose();
+
+      const oldMats = Array.isArray(old.material) ? old.material : [old.material];
+      oldMats.forEach((m: any) => m?.dispose?.());
+    }
 
     const overlayMat = new THREE.MeshBasicMaterial({
       map: stickerTex,
@@ -1153,9 +1394,12 @@ function LogoLayer({
     overlayMat.polygonOffsetFactor = -2 - index;
     overlayMat.polygonOffsetUnits = -2 - index;
 
+    // ✅ ใช้ geometry ของผิวจริงเหมือน TYPE-5
+    // TYPE-2 จะติดผิววัตถุ ไม่ลอย และใช้ UV by normal จากด้านล่างเหมือน TYPE-5
     const overlay = new THREE.Mesh(logoMesh.geometry, overlayMat);
     overlay.name = overlayName;
     overlay.renderOrder = 999 + index;
+    overlay.frustumCulled = false;
 
     logoMesh.add(overlay);
 
@@ -1163,7 +1407,13 @@ function LogoLayer({
       overlay.parent?.remove(overlay);
       overlayMat.dispose();
     };
-  }, [logoMesh, stickerTex, logo.id, logo.url, index]);
+  }, [
+    logoMesh,
+    stickerTex,
+    logo.id,
+    logo.url,
+    index,
+  ]);
 
   const decalProj = config.decal.uvProjection;
   const decalRot = config.decal.rotation ? config.decal.rotation[2] : 0;
@@ -1179,22 +1429,22 @@ function LogoLayer({
 
       const proj: UVProjection = isType4 ? "XZ" : (decalProj || "XZ");
       if (proj === "XY") {
-        du = s.x; dv = s.y;
+        du = s.x;
+        dv = s.y;
       } else if (proj === "XZ") {
-        du = s.x; dv = s.z;
+        du = s.x;
+        dv = s.z;
       } else {
-        du = s.y; dv = s.z;
+        du = s.y;
+        dv = s.z;
       }
 
-      du = Math.max(0.001, du);
-      dv = Math.max(0.001, dv);
+      du = Math.max(0.001, Math.abs(du));
+      dv = Math.max(0.001, Math.abs(dv));
 
-      const maxDim = Math.max(du, dv);
-
-      // ✅ TYPE-2 เท่านั้น: ไม่ normalize ตาม bbox เพราะทำให้โลโก้/วงกลมยืดเป็นวงรี
-      // TYPE อื่นยังใช้ logic เดิมทั้งหมด เพื่อไม่ให้กระทบตำแหน่ง/สัดส่วนที่ตั้งไว้แล้ว
-      const normX = isType2 ? 1 : du / maxDim;
-      const normY = isType2 ? 1 : dv / maxDim;
+      const maxDim = Math.max(du, dv, 0.001);
+      const normX = du / maxDim;
+      const normY = dv / maxDim;
 
       const rotUI = logo.transform?.rot ?? 0;
       const totalRot = decalRot + rotUI;
@@ -1204,7 +1454,9 @@ function LogoLayer({
 
       let uiScale = 1;
       if (logo.transform?.scale !== undefined) {
-        uiScale = Array.isArray(logo.transform.scale) ? logo.transform.scale[0] : logo.transform.scale;
+        uiScale = Array.isArray(logo.transform.scale)
+          ? logo.transform.scale[0]
+          : logo.transform.scale;
       }
 
       stickerTex.matrixAutoUpdate = false;
@@ -1217,10 +1469,21 @@ function LogoLayer({
         .translate(0.5, 0.5);
     } else {
       stickerTex.matrixAutoUpdate = false;
-      stickerTex.matrix.identity().translate(-0.5, -0.5).rotate(decalRot).translate(0.5, 0.5);
+      stickerTex.matrix
+        .identity()
+        .translate(-0.5, -0.5)
+        .rotate(decalRot)
+        .translate(0.5, 0.5);
     }
-
-  }, [logo.transform, stickerTex, logoMesh, isFixedLogoType, isType2, isType4, decalProj, decalRot]);
+  }, [
+    logo.transform,
+    stickerTex,
+    logoMesh,
+    isFixedLogoType,
+    isType4,
+    decalProj,
+    decalRot,
+  ]);
 
   return null;
 }
@@ -1293,7 +1556,10 @@ function PlugScene({
     return getWorldAlignMatrixFromRef(scene, config.patternWorldRefMesh);
   }, [scene, wantsWorld, config.patternWorldRefMesh]);
 
-  const isFixedType = config.id === "TYPE-2" || config.id === "TYPE-3" || config.id === "TYPE-4";
+  // ✅ TYPE-2 เปลี่ยนโมเดลใหม่แล้ว ให้ใช้ระบบลายแบบ TYPE-5 เป็นหลัก
+  // ไม่บังคับ fixedWorldAxes กับ TYPE-2 เพราะโมเดลใหม่จะถูกเลือกแกนผิดและทำให้ลายเพี้ยน
+  const isType5PatternFamily = config.id === "TYPE-2" || config.id === "TYPE-5";
+  const isFixedType = config.id === "TYPE-3" || config.id === "TYPE-4";
 
   const fixedWorldAxes = useMemo<UVProjection | null>(() => {
     if (!isFixedType) return null;
@@ -1469,19 +1735,13 @@ function PlugScene({
           ...basePan,
           y: Math.max(0, Math.min(1, basePan.y + 0.035)),
         }
-        : config.id === "TYPE-5"
+        : isType5PatternFamily
           ? {
             ...basePan,
+            // ✅ TYPE-2 ใช้ค่าเริ่มต้นแบบ TYPE-5 ไม่ดันลายลง/ซูมเพิ่มเอง
             y: Math.max(0, Math.min(1, basePan.y + 0.01)),
           }
-          : config.id === "TYPE-2"
-            ? {
-              ...basePan,
-              ...basePan,
-              y: Math.max(0, Math.min(1, basePan.y + 0.20)),
-              zoom: Math.max(0.01, basePan.zoom * 1.50),
-            }
-            : basePan;
+          : basePan;
     const wantsWorldMain = config.patternDecal?.uvSpace === "world";
 
     const rot =
@@ -1490,9 +1750,9 @@ function PlugScene({
       0;
 
     const fitMode =
-      config.id === "TYPE-5"
-        ? "cover"
-        : (patternFitMode ?? "contain");
+      isType5PatternFamily
+        ? ((config.patternDecal as any)?.fitMode ?? "cover")
+        : (patternFitMode ?? (config.patternDecal as any)?.fitMode ?? "contain");
 
     const minRepeat = 0;
 
@@ -1514,8 +1774,8 @@ function PlugScene({
       fitMode,
       minRepeat,
       lockAxes: isFixedType ? true : config.patternDecal?.lockAxes,
-      // ✅ TYPE-5 ไม่เข้า fixed axes แต่เปิด stableRotate เพื่อตัดอาการซูมเข้า-ออกตอนหมุน
-      stableRotate: config.id === "TYPE-5" ? true : isFixedType,
+      // ✅ TYPE-2 ใช้ stableRotate แบบ TYPE-5 เพื่อตัดอาการซูม/ยืดตอนหมุนลาย
+      stableRotate: isType5PatternFamily ? true : isFixedType,
     });
   }, [
     logoMesh,
@@ -1530,10 +1790,12 @@ function PlugScene({
     patternOpacity,
     patternFitMode,
     isFixedType,
+    isType5PatternFamily,
     config.decal.uvProjection,
     config.patternDecal?.uvProjection,
     config.patternDecal?.uvSpace,
     (config.patternDecal as any)?.patternRotation,
+    (config.patternDecal as any)?.fitMode,
     patternWorldBBox,
     patternWorldAlign,
     config.patternDecal?.lockAxes,
@@ -1564,9 +1826,9 @@ function PlugScene({
       0;
 
     const fitMode =
-      config.id === "TYPE-5"
+      isType5PatternFamily
         ? ((sideCfg as any)?.fitMode ?? (config.patternDecal as any)?.fitMode ?? "cover")
-        : (patternFitMode ?? "contain");
+        : (patternFitMode ?? (sideCfg as any)?.fitMode ?? "contain");
 
     if (wantsWorldSide && patternWorldBBox && isFixedType && fixedWorldAxes) {
       axes = fixedWorldAxes;
@@ -1585,7 +1847,7 @@ function PlugScene({
       rotationRad: rot,
       fitMode,
       lockAxes: isFixedType ? true : sideCfg.lockAxes,
-      stableRotate: isFixedType,
+      stableRotate: isType5PatternFamily ? true : isFixedType,
     });
   }, [
     patternSideMesh,
@@ -1599,9 +1861,12 @@ function PlugScene({
     patternOpacity,
     patternFitMode,
     isFixedType,
+    isType5PatternFamily,
     config.patternSideDecal,
     config.patternDecal?.uvProjection,
     (config.patternDecal as any)?.patternRotation,
+    (config.patternDecal as any)?.fitMode,
+    (config.patternSideDecal as any)?.fitMode,
     patternWorldBBox,
     patternWorldAlign,
     fixedWorldAxes,
@@ -1664,13 +1929,16 @@ function PlugScene({
     prevConfigIdRef.current = config.id;
 
     // ✅ ใช้ 0,0,0 เสมอ เพราะเรามี <Center> ช่วยดึงโมเดลมาตรงกลางแล้ว
-    const pose = getSceneCameraPose(scene, camera, currentView);
+    const pose = getSceneCameraPose(scene, camera, currentView, config.id);
     applyCameraPose(camera, pose);
 
     // อัปเดตเป้าหมายการหมุน
     if (controls) {
       controls.target.copy(pose.target);
       controls.update();
+
+      // OrbitControls อาจจัดกล้องใหม่หลัง update จึงใส่ pose ซ้ำ เพื่อให้ up/roll ของ topRight ยังอยู่
+      applyCameraPose(camera, pose);
     }
   }, [scene, cameraRef, view, prevViewRef, controls, config.id]);
 
@@ -1698,7 +1966,7 @@ function PlugScene({
       exportCamera.zoom = liveCamera.zoom;
       exportCamera.up.copy(liveCamera.up);
 
-      const pose = getExportCameraPose(scene, exportCamera, opts?.view ?? "angle");
+      const pose = getExportCameraPose(scene, exportCamera, opts?.view ?? "angle", config.id);
       applyCameraPose(exportCamera, pose);
       exportCamera.updateMatrixWorld(true);
       await waitNextFrame();
@@ -1916,6 +2184,7 @@ export default function Plug3D({
   onRenderReady,
   orbitNudgeDirection = null,
   orbitNudgeTick = 0,
+  onAngleDebugChange,
 }: Plug3DProps) {
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -1973,6 +2242,12 @@ export default function Plug3D({
       <directionalLight position={[-4, 2, 1]} intensity={0.14} />
       <directionalLight position={[0, 3, -4]} intensity={0.18} />
       <directionalLight position={[0, -3, 2]} intensity={0.12} />
+
+      <AngleDebugReporter
+        configId={config.id}
+        view={view}
+        onChange={onAngleDebugChange}
+      />
 
       <Suspense fallback={null}>
         <PlugScene

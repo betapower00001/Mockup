@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import plugTypes from "../data/plugTypes";
 import { getPatternGroupsByType } from "../data/patterns";
-import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName } from "./Plug3D";
+import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName, type AngleDebugInfo } from "./Plug3D";
 import ColorPicker from "./ColorPicker";
 import PlugSelector from "./PlugSelector";
 import PatternPicker from "./PatternPicker";
@@ -270,6 +270,11 @@ const A4_VIEWS: { key: RenderViewName; label: string }[] = [
   { key: "right", label: "ด้านขวา" },
   { key: "back", label: "ด้านหลัง" },
   { key: "top", label: "ด้านบน" },
+];
+
+const INLINE_PREVIEW_VIEWS: { key: RenderViewName; label: string }[] = [
+  ...A4_VIEWS,
+  { key: "topRight", label: "บนเอียงขวา" },
 ];
 
 const VIEW_BUTTONS: {
@@ -1104,6 +1109,21 @@ function normalizeRad(r: number) {
   return x;
 }
 
+function formatAngleDebugNumber(value: number) {
+  if (!Number.isFinite(value)) return "0";
+  return Number(value.toFixed(3)).toString();
+}
+
+function formatAngleDebugTuple(value?: [number, number, number]) {
+  if (!value) return "[0, 0, 0]";
+  return `[${value.map((n) => formatAngleDebugNumber(n)).join(", ")}]`;
+}
+
+function formatAngleDebugVectorCode(value?: [number, number, number]) {
+  if (!value) return "new THREE.Vector3(0, 0, 1)";
+  return `new THREE.Vector3(${value.map((n) => formatAngleDebugNumber(n)).join(", ")})`;
+}
+
 /* =========================
    Component
 ========================= */
@@ -1132,6 +1152,7 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [mobileAccordionOpen, setMobileAccordionOpen] = useState(true);
   const [viewPreviewMap, setViewPreviewMap] = useState<Partial<Record<RenderViewName, string>>>({});
   const [viewPreviewLoading, setViewPreviewLoading] = useState(false);
+  const [angleDebugInfo, setAngleDebugInfo] = useState<AngleDebugInfo | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1496,7 +1517,7 @@ export default function PlugCustomizer({ plugId }: Props) {
 
     try {
       const pairs = await Promise.all(
-        A4_VIEWS.map(async (item) => [item.key, await buildInlinePreview(item.key)] as const)
+        INLINE_PREVIEW_VIEWS.map(async (item) => [item.key, await buildInlinePreview(item.key)] as const)
       );
 
       const next: Partial<Record<RenderViewName, string>> = {};
@@ -2262,7 +2283,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               gap: 12,
             }}
           >
-            {A4_VIEWS.map((item) => {
+            {INLINE_PREVIEW_VIEWS.map((item) => {
               const src = viewPreviewMap[item.key];
               return (
                 <div
@@ -2365,7 +2386,65 @@ export default function PlugCustomizer({ plugId }: Props) {
                   onRenderReady={(render) => {
                     renderRef.current = render;
                   }}
+                  onAngleDebugChange={setAngleDebugInfo}
                 />
+
+                {angleDebugInfo && (
+                  <div
+                    aria-label="3D Angle Debug"
+                    style={{
+                      position: "absolute",
+                      left: 10,
+                      top: 10,
+                      zIndex: 50,
+                      width: "min(360px, calc(100% - 20px))",
+                      maxHeight: "calc(100% - 20px)",
+                      overflow: "auto",
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      background: "rgba(15, 23, 42, 0.88)",
+                      color: "#ffffff",
+                      boxShadow: "0 16px 36px rgba(15, 23, 42, 0.28)",
+                      fontSize: 11,
+                      lineHeight: 1.35,
+                      pointerEvents: "none",
+                      textAlign: "left",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 6 }}>3D Angle Debug · Realtime</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "112px 1fr", gap: "3px 8px" }}>
+                      <span>TYPE</span>
+                      <strong>{angleDebugInfo.type}</strong>
+                      <span>view</span>
+                      <strong>{angleDebugInfo.view}</strong>
+                      <span>scene dir</span>
+                      <strong>{formatAngleDebugTuple(angleDebugInfo.sceneDir)}</strong>
+                      <span>scene yaw</span>
+                      <strong>{formatAngleDebugNumber(angleDebugInfo.sceneYaw)}°</strong>
+                      <span>scene elevation</span>
+                      <strong>{formatAngleDebugNumber(angleDebugInfo.sceneElevation)}°</strong>
+                      <span>export dir</span>
+                      <strong>{formatAngleDebugTuple(angleDebugInfo.exportDir)}</strong>
+                      <span>export yaw</span>
+                      <strong>{formatAngleDebugNumber(angleDebugInfo.exportYaw)}°</strong>
+                      <span>export elevation</span>
+                      <strong>{formatAngleDebugNumber(angleDebugInfo.exportElevation)}°</strong>
+                      <span>export mul</span>
+                      <strong>{formatAngleDebugNumber(angleDebugInfo.exportMul)}</strong>
+                      <span>roll</span>
+                      <strong>{formatAngleDebugNumber(angleDebugInfo.roll)}°</strong>
+                      <span>up</span>
+                      <strong>{formatAngleDebugTuple(angleDebugInfo.up)}</strong>
+                    </div>
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.18)" }}>
+                      <div style={{ opacity: 0.75, marginBottom: 3 }}>copy ไปใส่ใน case ได้:</div>
+                      <code style={{ color: "#bfdbfe", whiteSpace: "normal", wordBreak: "break-word" }}>
+                        dir = {formatAngleDebugVectorCode(angleDebugInfo.sceneDir)};
+                      </code>
+                    </div>
+                  </div>
+                )}
+
                 {isMobileLayout && (
                   <div className="mobileOrbitBar" aria-label="ปุ่มหมุน 3D บนมือถือ">
                     <div className="orbitPad">

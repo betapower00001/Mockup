@@ -140,18 +140,21 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
     patternDecal: {
       meshName: "Top_Front",
       position: [0, 0, 0.002],
-      rotation: [0, 0, 0],
+      // ✅ TYPE-2 ใช้ชุด mapping แบบ TYPE-5 เพื่อให้ลายไม่เพี้ยนหลังเปลี่ยนโมเดล
+      rotation: [0, 0, 1.5708],
       scale: 0.35,
 
-      uvProjection: "YZ",
+      uvProjection: "XZ",
       flipU: false,
-      flipV: false,
+      flipV: true,
       forceUV: true,
+      lockAxes: true,
       uvSpace: "world",
 
-      useTriplanar: true,
-      patternRotation: -Math.PI / 2,
+      patternRotation: 0,
+      enablePattern: true,
       worldAlign: true,
+      fitMode: "cover",
     },
 
     patternSideDecal: {
@@ -160,7 +163,7 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       rotation: [0, 0, 0],
       scale: 0.35,
 
-      uvProjection: "XY",
+      uvProjection: "XZ",
       flipU: true,
       flipV: false,
 
