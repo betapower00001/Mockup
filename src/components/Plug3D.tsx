@@ -13,6 +13,10 @@ import { useStickerTexture } from "./useStickerTexture";
 
 const cityEnv = import("@pmndrs/assets/hdri/city.exr").then((m) => m.default);
 
+// ✅ ปิดหน้าต่างแสดงองศาชั่วคราว
+// ถ้าต้องการเปิดกลับ ให้เปลี่ยนเป็น true
+const ENABLE_ANGLE_DEBUG_REPORTER = false;
+
 export type RenderViewName = "front" | "angle" | "left" | "right" | "back" | "top" | "bottom" | "topRight";
 
 export type PlugRenderOptions = {
@@ -2196,6 +2200,13 @@ export default function Plug3D({
   const cameraPos = useMemo(() => [0, 0.1, 3] as [number, number, number], []);
   const lockControls = dragLogoMode || dragPatternMode || renderMode;
 
+  // ✅ เมื่อปิด debug ให้เคลียร์ค่าจาก parent เพื่อให้หน้าต่างองศาหายทันที
+  useEffect(() => {
+    if (!ENABLE_ANGLE_DEBUG_REPORTER) {
+      onAngleDebugChange?.(null);
+    }
+  }, [onAngleDebugChange]);
+
   useEffect(() => {
     if (!orbitNudgeDirection || orbitNudgeTick === 0) return;
 
@@ -2243,11 +2254,13 @@ export default function Plug3D({
       <directionalLight position={[0, 3, -4]} intensity={0.18} />
       <directionalLight position={[0, -3, 2]} intensity={0.12} />
 
-      <AngleDebugReporter
-        configId={config.id}
-        view={view}
-        onChange={onAngleDebugChange}
-      />
+      {ENABLE_ANGLE_DEBUG_REPORTER && (
+        <AngleDebugReporter
+          configId={config.id}
+          view={view}
+          onChange={onAngleDebugChange}
+        />
+      )}
 
       <Suspense fallback={null}>
         <PlugScene
