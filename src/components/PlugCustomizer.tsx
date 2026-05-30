@@ -1716,10 +1716,23 @@ export default function PlugCustomizer({ plugId }: Props) {
     });
   }
 
+  function clearDragModes() {
+    setDragLogoMode(false);
+    setDragPatternMode(false);
+  }
+
+  function changeStep(nextStep: StepId) {
+    if (nextStep !== step) {
+      clearDragModes();
+    }
+
+    setStep(nextStep);
+  }
+
   function goNext() {
     const next = STEPS[currentStepIdx + 1]?.id;
     if (next) {
-      setStep(next);
+      changeStep(next);
       if (isMobileLayout) {
         setMobileAccordionOpen(true);
         scrollToMobileStep(next);
@@ -1730,7 +1743,7 @@ export default function PlugCustomizer({ plugId }: Props) {
   function goBack() {
     const prev = STEPS[currentStepIdx - 1]?.id;
     if (prev) {
-      setStep(prev);
+      changeStep(prev);
       if (isMobileLayout) {
         setMobileAccordionOpen(true);
         scrollToMobileStep(prev);
@@ -1745,7 +1758,7 @@ export default function PlugCustomizer({ plugId }: Props) {
       if (isSameStep) {
         setMobileAccordionOpen(!mobileAccordionOpen);
       } else {
-        setStep(stepId);
+        changeStep(stepId);
         setMobileAccordionOpen(true);
       }
 
@@ -1753,7 +1766,7 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    setStep(stepId);
+    changeStep(stepId);
   }
 
   function renderStepNavButtons() {
@@ -1901,9 +1914,13 @@ export default function PlugCustomizer({ plugId }: Props) {
           <label className="row" style={{ gap: 8, marginTop: 10 }}>
             <input
               type="checkbox"
-              checked={dragPatternMode}
+              checked={step === "pattern" && dragPatternMode}
               disabled={!hasPattern}
-              onChange={(e) => setDragPatternMode(e.target.checked)}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setDragPatternMode(checked);
+                if (checked) setDragLogoMode(false);
+              }}
             />
             <span className="label" style={{ opacity: hasPattern ? 1 : 0.55 }}>
               โหมดลากลาย (ลากบนโมเดลได้เลย)
@@ -2120,9 +2137,13 @@ export default function PlugCustomizer({ plugId }: Props) {
           <label className="row" style={{ gap: 8 }}>
             <input
               type="checkbox"
-              checked={dragLogoMode}
+              checked={step === "logo" && dragLogoMode}
               disabled={!activeLogo.url}
-              onChange={(e) => setDragLogoMode(e.target.checked)}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setDragLogoMode(checked);
+                if (checked) setDragPatternMode(false);
+              }}
             />
             <span className="label" style={{ opacity: activeLogo.url ? 1 : 0.55 }}>
               โหมดลากโลโก้ (สำหรับ {`โลโก้ ${logos.findIndex((l) => l.id === activeLogoId) + 1}`})
@@ -2342,8 +2363,8 @@ export default function PlugCustomizer({ plugId }: Props) {
                   onPatternTransformChange={setPatternTransform}
                   patternRotation={patternRotation}
                   colors={safeColors}
-                  dragLogoMode={dragLogoMode && activeLogo.url !== ""}
-                  dragPatternMode={dragPatternMode && hasPattern}
+                  dragLogoMode={step === "logo" && dragLogoMode && activeLogo.url !== ""}
+                  dragPatternMode={step === "pattern" && dragPatternMode && hasPattern}
                   view={customization.view}
                   orbitNudgeDirection={orbitNudgeDirection}
                   orbitNudgeTick={orbitNudgeTick}
@@ -2439,7 +2460,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               <div className="qa-stack">
                 <div className="qa-toolbar">
                   <div className="qa-toolbarGroup">
-                    <button type="button" className="btn btnGhost" onClick={() => setStep("logo")}>
+                    <button type="button" className="btn btnGhost" onClick={() => changeStep("logo")}>
                       ⚙️ ปรับแต่งโลโก้ (3 จุด)
                     </button>
                     <button type="button" className="btn btnGhost" onClick={resetLogo} disabled={!hasLogo}>
