@@ -266,25 +266,23 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
     modelPath: "/models/plug/Un4.glb",
 
     colorTargets: {
-      top: [
-        "Top_Side", "mat__top_Side", "topstone v2", "250201 v0.001",
-        "Bottom", "mat_bottom", "Part2", "Part3^Assem1",
-        "220108 cover shuter", "220108 cover shuter001",
-        "Ck Cord rewise STI 30-03-18", "PART TIS-04-1(0.5mm).001"
-      ],
-      bottom: [],
+      // TYPE-4 ปรับชื่อให้เหมือน TYPE-3:
+      // Top_Front = ด้านบน, Top_Side = ด้านข้าง, Bottom = ด้านล่าง
+      top: ["Top_Front", "Top_Side", "mat_top_Front", "mat_top_Side"],
+      bottom: ["Bottom", "mat_bottom"],
       switch: [],
     },
 
-    patternWorldBBoxMeshes: ["Top_Side"],
-    patternWorldRefMesh: "Top_Side",
+    // ✅ ลาย/โลโก้ต้องลงบน Top_Front เท่านั้น ไม่ลง Top_Side
+    patternWorldBBoxMeshes: ["Top_Front"],
+    patternWorldRefMesh: "Top_Front",
 
     decal: {
-      meshName: "Top_Side",
+      meshName: "Top_Front",
       position: [0, 0, 0.005],
       rotation: [0, 0, 0],
       scale: [0.08, 0.08, 0.08],
-      uvProjection: "XZ", // เดิมเป็น "XY"
+      uvProjection: "XZ",
       uvSpace: "local",
       flipU: false,
       flipV: false,
@@ -293,7 +291,7 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
     },
 
     patternDecal: {
-      meshName: "Top_Side",
+      meshName: "Top_Front",
       position: [0, 0, 0.002],
       rotation: [0, 0, 1.5708],
       scale: 0.35,
@@ -308,8 +306,9 @@ export const PLUG_CONFIGS: Record<string, PlugModelConfig> = {
       worldAlign: true,
     },
 
+    // ✅ ด้านข้างใช้สีจาก top ได้ แต่ไม่ให้ลายไปแปะด้านข้าง
     patternSideDecal: {
-      meshName: "Bottom",
+      meshName: "Top_Side",
       position: [0, 0, 0.002],
       rotation: [0, 0, 0],
       scale: 0.35,

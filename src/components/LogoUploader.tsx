@@ -4,27 +4,29 @@
 import React from "react";
 
 interface LogoUploaderProps {
-  id: string; // ✅ เพิ่ม ID เพื่อระบุว่าเป็นโลโก้ช่องที่เท่าไหร่
-  label?: string; // ✅ ชื่อปุ่ม (เช่น โลโก้ 1, โลโก้ 2)
-  currentUrl?: string; // ✅ เอาไว้เช็คว่าตอนนี้ช่องนี้มีรูปหรือยัง
-  onSelect: (id: string, url: string) => void; // ✅ ส่ง id กลับไปด้วย
-  onRemove?: (id: string) => void; // ✅ ฟังก์ชันสำหรับลบโลโก้
+  id: string;
+  label?: string;
+  currentUrl?: string;
+  onSelect: (id: string, url: string) => void;
+  onRemove?: (id: string) => void;
 }
 
-export default function LogoUploader({ 
-  id, 
-  label = "อัปโหลด LOGO", 
-  currentUrl, 
-  onSelect, 
-  onRemove 
+export default function LogoUploader({
+  id,
+  label = "โลโก้",
+  currentUrl,
+  onSelect,
+  onRemove,
 }: LogoUploaderProps) {
+  const hasLogo = !!currentUrl;
+
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target;
     const file = input.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      alert("กรุณาเลือกไฟล์รูปภาพ (PNG / JPG / SVG)");
+      alert("กรุณาเลือกไฟล์รูปภาพ PNG / JPG / SVG");
       input.value = "";
       return;
     }
@@ -34,7 +36,7 @@ export default function LogoUploader({
     reader.onload = () => {
       const result = reader.result;
       if (typeof result === "string") {
-        onSelect(id, result); // ⭐ ส่ง id กลับไปพร้อม base64
+        onSelect(id, result);
       }
       input.value = "";
     };
@@ -48,47 +50,127 @@ export default function LogoUploader({
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-      <label
+    <div
+      style={{
+        width: "100%",
+        marginBottom: 14,
+      }}
+    >
+      <div
         style={{
-          padding: "8px 12px",
-          background: currentUrl ? "#e0f7fa" : "#dddddd", // เปลี่ยนสีถ้าอัปโหลดแล้ว
-          borderRadius: 6,
-          cursor: "pointer",
-          border: currentUrl ? "1px solid #00acc1" : "1px solid #cccccc",
-          display: "inline-block",
-          flex: 1,
-          textAlign: "center",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: 10,
+          borderRadius: 14,
+          background: hasLogo
+            ? "linear-gradient(135deg, #ecfeff, #f0fdfa)"
+            : "linear-gradient(135deg, #ffffff, #f8fafc)",
+          border: hasLogo ? "1px solid #06b6d4" : "1px solid #dbe3ef",
+          boxShadow: hasLogo
+            ? "0 8px 22px rgba(6, 182, 212, 0.16)"
+            : "0 6px 18px rgba(15, 23, 42, 0.08)",
         }}
       >
-        {currentUrl ? `✅ เปลี่ยน ${label}` : `⬆️ อัปโหลด ${label}`}
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/svg+xml"
-          hidden
-          onChange={handleFile}
-          onClick={(e) => {
-            (e.currentTarget as HTMLInputElement).value = "";
-          }}
-        />
-      </label>
-
-      {/* ปุ่มลบ จะแสดงก็ต่อเมื่อมีรูปถูกอัปโหลดไว้แล้ว */}
-      {currentUrl && onRemove && (
-        <button
-          onClick={() => onRemove(id)}
+        <div
           style={{
-            padding: "8px 12px",
-            background: "#ffebee",
-            color: "#c62828",
-            border: "1px solid #ffcdd2",
-            borderRadius: 6,
-            cursor: "pointer",
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            background: hasLogo ? "#ffffff" : "#eef2ff",
+            border: hasLogo ? "1px solid #a5f3fc" : "1px solid #dbeafe",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+            flexShrink: 0,
           }}
         >
-          ลบ
-        </button>
-      )}
+          {hasLogo ? (
+            <img
+              src={currentUrl}
+              alt={label}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                padding: 5,
+              }}
+            />
+          ) : (
+            <span style={{ fontSize: 20 }}>＋</span>
+          )}
+        </div>
+
+        <label
+          style={{
+            flex: 1,
+            minHeight: 46,
+            borderRadius: 12,
+            cursor: "pointer",
+            background: hasLogo
+              ? "linear-gradient(135deg, #0891b2, #0f766e)"
+              : "linear-gradient(135deg, #2563eb, #7c3aed)",
+            color: "#ffffff",
+            border: "none",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 800,
+            letterSpacing: 0.2,
+            boxShadow: hasLogo
+              ? "0 8px 18px rgba(15, 118, 110, 0.28)"
+              : "0 8px 18px rgba(37, 99, 235, 0.28)",
+            userSelect: "none",
+          }}
+        >
+          <span style={{ fontSize: 14 }}>
+            {hasLogo ? `เปลี่ยน ${label}` : `อัปโหลด ${label}`}
+          </span>
+
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              opacity: 0.86,
+              marginTop: 2,
+            }}
+          >
+            PNG / JPG / SVG
+          </span>
+
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/svg+xml"
+            hidden
+            onChange={handleFile}
+            onClick={(e) => {
+              (e.currentTarget as HTMLInputElement).value = "";
+            }}
+          />
+        </label>
+
+        {hasLogo && onRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(id)}
+            style={{
+              minWidth: 58,
+              height: 46,
+              borderRadius: 12,
+              cursor: "pointer",
+              background: "#fff1f2",
+              color: "#be123c",
+              border: "1px solid #fecdd3",
+              fontWeight: 800,
+              boxShadow: "0 6px 14px rgba(190, 18, 60, 0.12)",
+            }}
+          >
+            ลบ
+          </button>
+        )}
+      </div>
     </div>
   );
 }

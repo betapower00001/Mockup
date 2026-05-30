@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import plugTypes from "../data/plugTypes";
 import { getPatternGroupsByType } from "../data/patterns";
-import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName, type AngleDebugInfo } from "./Plug3D";
+import Plug3D, { PatternTransform, type PlugRenderFn, type RenderViewName } from "./Plug3D";
 import ColorPicker from "./ColorPicker";
 import PlugSelector from "./PlugSelector";
 import PatternPicker from "./PatternPicker";
@@ -1109,21 +1109,6 @@ function normalizeRad(r: number) {
   return x;
 }
 
-function formatAngleDebugNumber(value: number) {
-  if (!Number.isFinite(value)) return "0";
-  return Number(value.toFixed(3)).toString();
-}
-
-function formatAngleDebugTuple(value?: [number, number, number]) {
-  if (!value) return "[0, 0, 0]";
-  return `[${value.map((n) => formatAngleDebugNumber(n)).join(", ")}]`;
-}
-
-function formatAngleDebugVectorCode(value?: [number, number, number]) {
-  if (!value) return "new THREE.Vector3(0, 0, 1)";
-  return `new THREE.Vector3(${value.map((n) => formatAngleDebugNumber(n)).join(", ")})`;
-}
-
 /* =========================
    Component
 ========================= */
@@ -1152,7 +1137,6 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [mobileAccordionOpen, setMobileAccordionOpen] = useState(true);
   const [viewPreviewMap, setViewPreviewMap] = useState<Partial<Record<RenderViewName, string>>>({});
   const [viewPreviewLoading, setViewPreviewLoading] = useState(false);
-  const [angleDebugInfo, setAngleDebugInfo] = useState<AngleDebugInfo | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1185,10 +1169,7 @@ export default function PlugCustomizer({ plugId }: Props) {
 
   const safeColors = useMemo(() => {
     const top = ensureAllowedColor(customization.topColor, currentColorOptions.top);
-    const bottom =
-      selectedPlugId === "TYPE-4"
-        ? top
-        : ensureAllowedColor(customization.bottomColor, currentColorOptions.bottom);
+    const bottom = ensureAllowedColor(customization.bottomColor, currentColorOptions.bottom);
 
     const out: Partial<Record<ColorKey, string>> = {
       top,
@@ -1215,7 +1196,7 @@ export default function PlugCustomizer({ plugId }: Props) {
   const hasPattern = !!customization.patternUrl && customization.patternUrl.trim() !== "";
   const currentStepIdx = stepIndex(step);
 
-  const showQuickBottom = selectedPlugId !== "TYPE-4";
+  const showQuickBottom = true;
   const showQuickSwitch =
     selectedPlugId !== "TYPE-1" &&
     selectedPlugId !== "TYPE-3" &&
@@ -1226,13 +1207,6 @@ export default function PlugCustomizer({ plugId }: Props) {
   function patchCustomization(patch: Partial<CustomizationState>) {
     setCustomization((s) => {
       const next = { ...s, ...patch };
-
-      if (selectedPlugId === "TYPE-4") {
-        const singleColor = patch.topColor ?? next.topColor ?? s.topColor;
-        next.topColor = singleColor;
-        next.bottomColor = singleColor;
-      }
-
       return next;
     });
   }
@@ -1255,7 +1229,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     patchCustomization({
       patternUrl: "",
       topColor: baseColor,
-      bottomColor: selectedPlugId === "TYPE-4" ? baseColor : "#eaeaea",
+      bottomColor: currentColorOptions.bottom[0]?.value ?? "#eaeaea",
       switchColor: (currentColorOptions.switch ?? currentColorOptions.top)[0]?.value ?? "#ffffff",
     });
 
@@ -1373,18 +1347,13 @@ export default function PlugCustomizer({ plugId }: Props) {
     ctx.font = "34px sans-serif";
     ctx.fillText(`รุ่น: ${plug.name ?? selectedPlugId}`, 140, 220);
     ctx.fillText(
-      selectedPlugId === "TYPE-4"
-        ? `สีตัวปลั๊ก: ${getColorLabel(
-          safeColors.top ?? customization.topColor,
-          currentColorOptions.top
-        )}`
-        : `สีบน: ${getColorLabel(
-          safeColors.top ?? customization.topColor,
-          currentColorOptions.top
-        )}   สีล่าง: ${getColorLabel(
-          safeColors.bottom ?? customization.bottomColor,
-          currentColorOptions.bottom
-        )}`,
+      `สีบน: ${getColorLabel(
+        safeColors.top ?? customization.topColor,
+        currentColorOptions.top
+      )}   สีล่าง: ${getColorLabel(
+        safeColors.bottom ?? customization.bottomColor,
+        currentColorOptions.bottom
+      )}`,
       140,
       270
     );
@@ -1702,10 +1671,7 @@ export default function PlugCustomizer({ plugId }: Props) {
         ...s,
         patternUrl: "",
         topColor: nextTop,
-        bottomColor:
-          id === "TYPE-4"
-            ? nextTop
-            : ensureAllowedColor(s.bottomColor, nextOptions.bottom),
+        bottomColor: ensureAllowedColor(s.bottomColor, nextOptions.bottom),
         switchColor: ensureAllowedColor(
           s.switchColor,
           nextOptions.switch ?? nextOptions.top
@@ -1882,25 +1848,23 @@ export default function PlugCustomizer({ plugId }: Props) {
 
           <div style={{ marginTop: 10 }}>
             <ColorPicker
-              label={selectedPlugId === "TYPE-4" ? "สีตัวปลั๊ก" : "ฝาบน"}
+              label="ฝาบน"
               initialColor={customization.topColor}
               options={currentColorOptions.top}
               onColorChange={(c) => patchCustomization({ topColor: c })}
               allowCustom
             />
 
-            {selectedPlugId !== "TYPE-4" && (
-              <>
-                <div style={{ height: 10 }} />
-                <ColorPicker
-                  label="ฝาล่าง"
-                  initialColor={customization.bottomColor}
-                  options={currentColorOptions.bottom}
-                  onColorChange={(c) => patchCustomization({ bottomColor: c })}
-                  allowCustom
-                />
-              </>
-            )}
+            <>
+              <div style={{ height: 10 }} />
+              <ColorPicker
+                label="ฝาล่าง"
+                initialColor={customization.bottomColor}
+                options={currentColorOptions.bottom}
+                onColorChange={(c) => patchCustomization({ bottomColor: c })}
+                allowCustom
+              />
+            </>
 
             {selectedPlugId !== "TYPE-1" && selectedPlugId !== "TYPE-3" && selectedPlugId !== "TYPE-4" && (
               <>
@@ -2386,64 +2350,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                   onRenderReady={(render) => {
                     renderRef.current = render;
                   }}
-                  onAngleDebugChange={setAngleDebugInfo}
                 />
-
-                {angleDebugInfo && (
-                  <div
-                    aria-label="3D Angle Debug"
-                    style={{
-                      position: "absolute",
-                      left: 10,
-                      top: 10,
-                      zIndex: 50,
-                      width: "min(360px, calc(100% - 20px))",
-                      maxHeight: "calc(100% - 20px)",
-                      overflow: "auto",
-                      padding: "10px 12px",
-                      borderRadius: 12,
-                      background: "rgba(15, 23, 42, 0.88)",
-                      color: "#ffffff",
-                      boxShadow: "0 16px 36px rgba(15, 23, 42, 0.28)",
-                      fontSize: 11,
-                      lineHeight: 1.35,
-                      pointerEvents: "none",
-                      textAlign: "left",
-                    }}
-                  >
-                    <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 6 }}>3D Angle Debug · Realtime</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "112px 1fr", gap: "3px 8px" }}>
-                      <span>TYPE</span>
-                      <strong>{angleDebugInfo.type}</strong>
-                      <span>view</span>
-                      <strong>{angleDebugInfo.view}</strong>
-                      <span>scene dir</span>
-                      <strong>{formatAngleDebugTuple(angleDebugInfo.sceneDir)}</strong>
-                      <span>scene yaw</span>
-                      <strong>{formatAngleDebugNumber(angleDebugInfo.sceneYaw)}°</strong>
-                      <span>scene elevation</span>
-                      <strong>{formatAngleDebugNumber(angleDebugInfo.sceneElevation)}°</strong>
-                      <span>export dir</span>
-                      <strong>{formatAngleDebugTuple(angleDebugInfo.exportDir)}</strong>
-                      <span>export yaw</span>
-                      <strong>{formatAngleDebugNumber(angleDebugInfo.exportYaw)}°</strong>
-                      <span>export elevation</span>
-                      <strong>{formatAngleDebugNumber(angleDebugInfo.exportElevation)}°</strong>
-                      <span>export mul</span>
-                      <strong>{formatAngleDebugNumber(angleDebugInfo.exportMul)}</strong>
-                      <span>roll</span>
-                      <strong>{formatAngleDebugNumber(angleDebugInfo.roll)}°</strong>
-                      <span>up</span>
-                      <strong>{formatAngleDebugTuple(angleDebugInfo.up)}</strong>
-                    </div>
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.18)" }}>
-                      <div style={{ opacity: 0.75, marginBottom: 3 }}>copy ไปใส่ใน case ได้:</div>
-                      <code style={{ color: "#bfdbfe", whiteSpace: "normal", wordBreak: "break-word" }}>
-                        dir = {formatAngleDebugVectorCode(angleDebugInfo.sceneDir)};
-                      </code>
-                    </div>
-                  </div>
-                )}
 
                 {isMobileLayout && (
                   <div className="mobileOrbitBar" aria-label="ปุ่มหมุน 3D บนมือถือ">
@@ -2559,7 +2466,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                     </div>
 
                     <span className="badgeSoft">
-                      {plug.name ?? selectedPlugId} • {selectedPlugId === "TYPE-4" ? "สีเดียวทั้งชิ้น" : showQuickSwitch ? "3 ส่วน" : "2 ส่วน"}
+                      {plug.name ?? selectedPlugId} • {showQuickSwitch ? "3 ส่วน" : "2 ส่วน"}
                     </span>
                   </div>
 
@@ -2567,10 +2474,8 @@ export default function PlugCustomizer({ plugId }: Props) {
                     className={`qa-colorGrid ${quickColorCount === 1 ? "single" : ""} ${quickColorCount === 2 ? "double" : ""} ${quickColorCount === 3 ? "triple" : ""}`}
                   >
                     {renderQuickColorCard({
-                      label: selectedPlugId === "TYPE-4" ? "สีตัวปลั๊ก" : "ฝาบน",
-                      sub: selectedPlugId === "TYPE-4"
-                        ? "รุ่นนี้ใช้สีเดียวทั้งชิ้น เปลี่ยนตรงนี้แล้วจะอัปเดตทั้งบนและล่าง"
-                        : "ส่วนบนของตัวปลั๊ก",
+                      label: "ฝาบน",
+                      sub: "ส่วนบนของตัวปลั๊ก",
                       value: customization.topColor,
                       fallback: currentColorOptions.top[0]?.value ?? "#ffffff",
                       onChange: (color) => patchCustomization({ topColor: color }),
@@ -2578,7 +2483,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                         patchCustomization({
                           topColor: currentColorOptions.top[0]?.value ?? "#ffffff",
                         }),
-                      title: selectedPlugId === "TYPE-4" ? "เลือกสีตัวปลั๊ก" : "เลือกสีฝาบน",
+                      title: "เลือกสีฝาบน",
                     })}
 
                     {showQuickBottom &&
