@@ -1308,17 +1308,11 @@ export default function PlugCustomizer({ plugId }: Props) {
 
     const captures = await Promise.all(
       A4_VIEWS.map(async (item) => {
-        const rawSrc = await render({
-          transparent: true,
-          view: item.key,
-          download: false,
-          filename: `plug-${selectedPlugId}-${item.key}.png`,
-        });
+        const src = viewPreviewMap[item.key] ?? await buildInlinePreview(item.key);
 
-        const finalSrc = rawSrc ?? null;
         return {
           label: item.label,
-          src: finalSrc,
+          src,
         };
       })
     );
@@ -1418,33 +1412,12 @@ export default function PlugCustomizer({ plugId }: Props) {
     link.click();
   }
 
-  async function rotateImage180DataUrl(src: string) {
-    const img = await loadImage(src);
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth || img.width;
-    canvas.height = img.naturalHeight || img.height;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate(Math.PI);
-    ctx.drawImage(
-      img,
-      -(img.naturalWidth || img.width) / 2,
-      -(img.naturalHeight || img.height) / 2,
-      img.naturalWidth || img.width,
-      img.naturalHeight || img.height
-    );
-
-    return canvas.toDataURL("image/png");
-  }
-
   async function downloadViewImage(view: RenderViewName, filename?: string) {
     const render = renderRef.current;
     if (!render) return;
 
+    // ดาวน์โหลดเป็น PNG พื้นหลังโปร่ง แต่ใช้มุมเดียวกับภาพตัวอย่างด้านล่าง
+    // ห้ามหมุน top เพิ่ม ไม่อย่างนั้นไฟล์ที่ดาวน์โหลดจะกลับหัวไม่ตรง preview
     const src = await render({
       transparent: true,
       view,
@@ -1454,11 +1427,8 @@ export default function PlugCustomizer({ plugId }: Props) {
 
     if (!src) return;
 
-    const finalSrc = view === "top" ? await rotateImage180DataUrl(src) : src;
-    if (!finalSrc) return;
-
     const link = document.createElement("a");
-    link.href = finalSrc;
+    link.href = src;
     link.download = filename ?? `plug-${selectedPlugId}-${view}.png`;
     link.click();
   }
@@ -2209,11 +2179,10 @@ export default function PlugCustomizer({ plugId }: Props) {
             view={customization.view}
             onSetView={(v) => patchCustomization({ view: v })}
             onDownload={() => {
-              void renderRef.current?.({
-                transparent: true,
-                filename: `plug-${selectedPlugId}-${customization.view}.png`,
-                view: customization.view,
-              });
+              void downloadViewImage(
+                customization.view,
+                `plug-${selectedPlugId}-${customization.view}.png`
+              );
             }}
             onDownloadTop={() => {
               void downloadViewImage("top", `plug-${selectedPlugId}-top.png`);
@@ -3364,15 +3333,14 @@ input[type="range"]{
 }
 
 
-
 /* ✅ DESKTOP COMPACT: ให้ Mockup + แถบมุมมอง + Quick Actions เห็นครบ ไม่โดนตัด/ไม่หาย */
+
 @media (min-width: 769px){
   .pc-wrap{
     height:auto;
     min-height:100vh;
     overflow:auto;
   }
-
   .pc-grid{
     min-height:0;
     align-items:start;
@@ -4105,4 +4073,40 @@ input[type="range"]{
     gap:6px;
   }
 }
+
+
+/* ✅ PC ONLY: sticky ทั้งแถบด้านซ้าย ไม่เปลี่ยนส่วนอื่น */
+@media (min-width: 1181px){
+  .pc-wrap{
+    height:100vh !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+  }
+
+  .pc-grid{
+    align-items:start !important;
+    overflow:visible !important;
+  }
+
+  .left-panel{
+    position:sticky !important;
+    top:16px !important;
+    z-index:120 !important;
+    align-self:start !important;
+
+    /* ให้ซีกซ้ายค้างอยู่ และถ้าเนื้อหาสูงกว่าจอให้เลื่อนภายในเอง */
+    height:auto !important;
+    max-height:calc(100vh - 32px) !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+  }
+}
+
+/* ✅ PC ONLY: ปรับ padding-top เฉพาะซีกขวา */
+@media (min-width: 1181px){
+  .right-panel{
+    padding-top: 15px !important;
+  }
+}
+
 `;
