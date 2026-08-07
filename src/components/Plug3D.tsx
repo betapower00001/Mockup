@@ -674,15 +674,57 @@ function applyColorsByTargets(
   });
 }
 
+function normalizeBlenderTargetName(name?: string) {
+  return String(name || "")
+    .trim()
+    // Blender เติม .001, .002 เมื่อชื่อซ้ำ
+    .replace(/\.\d{3}$/i, "")
+    // ให้ Top_Front จับคู่กับ material ชื่อ mat_top_Front ได้
+    .replace(/^mat_/i, "")
+    .toLowerCase();
+}
+
 function findMeshByName(scene: THREE.Object3D, name: string): THREE.Mesh | null {
-  let found: THREE.Mesh | null = null;
-  const want = (name || "").trim();
+  const want = String(name || "").trim();
+  if (!want) return null;
+
+  const meshes: THREE.Mesh[] = [];
   scene.traverse((obj: any) => {
-    if (!obj?.isMesh) return;
-    const mesh = obj as THREE.Mesh;
-    if ((mesh.name || "").trim() === want) found = mesh;
+    if (obj?.isMesh) meshes.push(obj as THREE.Mesh);
   });
-  return found;
+
+  // ใช้ชื่อ Object/Mesh แบบตรงตัวก่อน เพื่อไม่เปลี่ยนพฤติกรรมของโมเดลหลัก
+  const exactObject = meshes.find((mesh) => String(mesh.name || "").trim() === want);
+  if (exactObject) return exactObject;
+
+  // รองรับชื่อ Mesh Data จาก Blender
+  const exactGeometry = meshes.find(
+    (mesh) => String((mesh.geometry as THREE.BufferGeometry)?.name || "").trim() === want
+  );
+  if (exactGeometry) return exactGeometry;
+
+  const normalizedWant = normalizeBlenderTargetName(want);
+
+  // รองรับชื่อที่ Blender เติม .001 โดยยังให้ความสำคัญกับ Object/Mesh ก่อน
+  const normalizedObject = meshes.find((mesh) => {
+    const objectName = normalizeBlenderTargetName(mesh.name);
+    const geometryName = normalizeBlenderTargetName(
+      (mesh.geometry as THREE.BufferGeometry)?.name
+    );
+    return objectName === normalizedWant || geometryName === normalizedWant;
+  });
+  if (normalizedObject) return normalizedObject;
+
+  // สำรองกรณี Object ไม่ได้ตั้งชื่อ แต่ Material ตั้งเป็น Top_Front/mat_top_Front
+  // คืนค่าเฉพาะเมื่อพบเพียงชิ้นเดียว เพื่อไม่เลือกผิวผิดโดยไม่ตั้งใจ
+  const materialMatches = meshes.filter((mesh) => {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    return materials.some(
+      (material: any) => normalizeBlenderTargetName(material?.name) === normalizedWant
+    );
+  });
+
+  return materialMatches.length === 1 ? materialMatches[0] : null;
 }
 
 function pickBestAxesFromBBox(mesh: THREE.Mesh): UVProjection {

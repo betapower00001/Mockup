@@ -1156,10 +1156,19 @@ export default function PlugCustomizer({ plugId }: Props) {
   }, []);
 
   const renderRef = useRef<PlugRenderFn | null>(null);
+  const productionRenderRef = useRef<PlugRenderFn | null>(null);
 
   const plugConfig = useMemo(
     () => getPlugConfig(selectedPlugId, { modelPath: plug.modelPath }),
     [selectedPlugId, plug.modelPath]
+  );
+
+  const productionPlugConfig = useMemo(
+    () =>
+      getPlugConfig(selectedPlugId, {
+        modelPath: plug.productionModelPath ?? plug.modelPath,
+      }),
+    [selectedPlugId, plug.modelPath, plug.productionModelPath]
   );
 
   const currentColorOptions = useMemo(
@@ -1492,7 +1501,37 @@ export default function PlugCustomizer({ plugId }: Props) {
   ]);
 
   async function downloadProductionSampleTop() {
-    const render = renderRef.current;
+    // TYPE-1, TYPE-2, TYPE-3, TYPE-4 และ TYPE-5: ดาวน์โหลดจากจอเล็ก “ไฟล์ผลิต” โดยตรง
+    // ใช้วิธีเดียวกับปุ่มโหลดภาพมุมบน แต่เปลี่ยนต้นทางเป็น productionRenderRef
+    // ไม่อิงจอใหญ่ ไม่สร้างลาย/โลโก้ซ้ำ และไม่ผ่านระบบ Canvas ทำไฟล์ผลิตเดิม
+    if (
+      selectedPlugId === "TYPE-1" ||
+      selectedPlugId === "TYPE-2" ||
+      selectedPlugId === "TYPE-3" ||
+      selectedPlugId === "TYPE-4" ||
+      selectedPlugId === "TYPE-5"
+    ) {
+      const render = productionRenderRef.current;
+      if (!render) return;
+
+      const src = await render({
+        transparent: true,
+        view: "top",
+        download: false,
+        filename: `plug-${selectedPlugId}-production-top.png`,
+      });
+
+      if (!src) return;
+
+      const link = document.createElement("a");
+      link.href = src;
+      link.download = `plug-${selectedPlugId}-production-top.png`;
+      link.click();
+      return;
+    }
+
+    // TYPE อื่นคงระบบไฟล์ผลิตเดิมไว้ ไม่แก้ส่วนที่ไม่เกี่ยวข้อง
+    const render = productionRenderRef.current ?? renderRef.current;
     if (!render) return;
 
     const rawSrc = await render({
@@ -2341,6 +2380,30 @@ export default function PlugCustomizer({ plugId }: Props) {
                     renderRef.current = render;
                   }}
                 />
+
+                <div className="productionPreviewInset" aria-label="โมเดลสำหรับ Export ส่งผลิต">
+                  <div className="productionPreviewHead">
+                    <span>ไฟล์ผลิต</span>
+                    <span className="productionPreviewDot" aria-hidden="true" />
+                  </div>
+                  <div className="productionPreviewCanvas">
+                    <Plug3D
+                      key={productionPlugConfig.modelPath}
+                      config={productionPlugConfig}
+                      logos={logos}
+                      activeLogoId={activeLogoId}
+                      patternUrl={customization.patternUrl}
+                      patternTransform={patternTransform}
+                      patternRotation={patternRotation}
+                      colors={safeColors}
+                      view="top"
+                      renderMode
+                      onRenderReady={(render) => {
+                        productionRenderRef.current = render;
+                      }}
+                    />
+                  </div>
+                </div>
 
                 {isMobileLayout && (
                   <div className="mobileOrbitBar" aria-label="ปุ่มหมุน 3D บนมือถือ">
@@ -3323,6 +3386,59 @@ const CSS = `
   position:relative;
 }
 
+.productionPreviewInset{
+  position:absolute;
+  top:12px;
+  right:12px;
+  z-index:18;
+  width:clamp(132px, 24%, 190px);
+  aspect-ratio:1 / 1;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,.92);
+  background:rgba(255,255,255,.9);
+  box-shadow:0 16px 34px rgba(15,23,42,.2);
+  backdrop-filter:blur(10px);
+  pointer-events:none;
+}
+
+.productionPreviewHead{
+  height:30px;
+  flex:0 0 30px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 10px;
+  color:#0f172a;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.02em;
+  background:rgba(255,255,255,.94);
+  border-bottom:1px solid rgba(226,232,240,.9);
+}
+
+.productionPreviewDot{
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:#22c55e;
+  box-shadow:0 0 0 3px rgba(34,197,94,.16);
+}
+
+.productionPreviewCanvas{
+  flex:1;
+  min-height:0;
+  background:linear-gradient(180deg,#eef6ff,#ffffff);
+}
+
+.productionPreviewCanvas canvas{
+  display:block;
+  width:100% !important;
+  height:100% !important;
+}
+
 .mobileOrbitOverlay,
 .mobileOrbitBar{
   display:none;
@@ -3869,6 +3985,25 @@ input[type="range"]{
     display:block;
     width:100% !important;
     height:100% !important;
+  }
+
+  .productionPreviewInset{
+    top:8px;
+    right:8px;
+    width:108px;
+    border-radius:14px;
+  }
+
+  .productionPreviewHead{
+    height:24px;
+    flex-basis:24px;
+    padding:0 7px;
+    font-size:9px;
+  }
+
+  .productionPreviewDot{
+    width:6px;
+    height:6px;
   }
 
   .mobileOrbitBar{

@@ -36,6 +36,7 @@ const downloadBtn = (gradient: string): React.CSSProperties => ({
 
 export default function LayoutPreview({
   onDownloadTop,
+  onDownloadProductionSample,
   onDownloadA4,
   onDownloadView,
 }: LayoutPreviewProps) {
@@ -70,6 +71,14 @@ export default function LayoutPreview({
           style={downloadBtn("linear-gradient(135deg,#06b6d4,#6366f1)")}
         >
           ↗️ โหลดบนเอียงขวา
+        </button>
+
+        <button
+          type="button"
+          onClick={onDownloadProductionSample}
+          style={downloadBtn("linear-gradient(135deg,#0f172a,#475569)")}
+        >
+          🏭 โหลดไฟล์ผลิต
         </button>
 
         <button
