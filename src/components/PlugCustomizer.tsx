@@ -1858,6 +1858,24 @@ export default function PlugCustomizer({ plugId }: Props) {
     }
   }
 
+  async function renderWithTimeout(
+    renderPromise: Promise<string | null | undefined>,
+    timeoutMs: number,
+    timeoutMessage: string
+  ) {
+    let timer = 0;
+    try {
+      return await Promise.race([
+        renderPromise,
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+  }
+
   async function readMessengerConfigStatus() {
     const response = await fetchWithTimeout(
       "/api/messenger/status",
@@ -1925,26 +1943,34 @@ export default function PlugCustomizer({ plugId }: Props) {
       const topRightFileName = `${orderId}-top-right.png`;
       const pdfFileName = `${orderId}-order.pdf`;
 
-      const productionSrc = await productionRender({
-        transparent: true,
-        view: "top",
-        download: false,
-        width: 3000,
-        height: 3000,
-        filename: productionFileName,
-      });
+      const productionSrc = await renderWithTimeout(
+        productionRender({
+          transparent: true,
+          view: "top",
+          download: false,
+          width: 1800,
+          height: 1800,
+          filename: productionFileName,
+        }),
+        30_000,
+        "สร้าง Production PNG ใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
+      );
       if (!productionSrc) throw new Error("สร้างไฟล์ผลิตไม่สำเร็จ");
 
       setMessengerPackageStatus("กำลังสร้างภาพมุมบนเอียงขวา...");
       updateMessengerPopup(messengerPopup, "กำลังสร้างภาพ", "Production PNG สำเร็จ\nกำลังสร้างภาพมุมบนเอียงขวา...");
-      const topRightSrc = await mainRender({
-        transparent: false,
-        view: "topRight",
-        download: false,
-        width: 2400,
-        height: 2400,
-        filename: topRightFileName,
-      });
+      const topRightSrc = await renderWithTimeout(
+        mainRender({
+          transparent: false,
+          view: "topRight",
+          download: false,
+          width: 1600,
+          height: 1600,
+          filename: topRightFileName,
+        }),
+        30_000,
+        "สร้างภาพมุมบนเอียงขวาใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
+      );
       if (!topRightSrc) throw new Error("สร้างภาพมุมบนเอียงขวาไม่สำเร็จ");
 
       const topLabel = getColorLabel(
