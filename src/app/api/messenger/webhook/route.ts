@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
+import {
+  readMessengerTextReferralToken,
+  type MessengerTextReferralPayload,
+} from "@/lib/messengerTextReferralToken";
 import { getMessengerMetaConfigStatus, requireMessengerMetaConfig } from "@/lib/messengerMetaConfig";
 
 export const runtime = "nodejs";
@@ -19,7 +23,6 @@ function verifyMetaSignature(rawBody: string, signature: string | null, appSecre
 
 async function sendText(psid: string, text: string) {
   const metaConfig = requireMessengerMetaConfig();
-
   const response = await fetch(
     `https://graph.facebook.com/${metaConfig.graphVersion}/me/messages`,
     {
@@ -43,6 +46,69 @@ async function sendText(psid: string, text: string) {
   }
 }
 
+function modelName(modelNumber: number) {
+  return ({
+    1: "Arthur",
+    2: "Wallace",
+    3: "Caesar",
+    4: "Mulan",
+    5: "Hector",
+  } as Record<number, string>)[modelNumber] || `TYPE-${modelNumber}`;
+}
+
+function formatBaht(value: number) {
+  return `฿${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function orderText(order: MessengerTextReferralPayload) {
+  const total = order.q * order.u;
+  return [
+    "สนใจสั่งผลิตสินค้า",
+    `Mockup: ${modelName(order.m)}`,
+    `รุ่นสินค้า: TYPE-${order.m}`,
+    `จำนวน: ${order.q.toLocaleString("th-TH")} ชิ้น`,
+    `ราคา/ชิ้น: ${formatBaht(order.u)}`,
+    `ราคารวม: ${formatBaht(total)}`,
+    "",
+    `Order ID: ${order.o}`,
+    "สามารถคุยรายละเอียดงานต่อในแชตนี้ได้เลยค่ะ",
+  ].join("\n");
+}
+
+function getReferralRef(event: any): string | null {
+  const candidates = [event?.referral?.ref, event?.postback?.referral?.ref];
+  const found = candidates.find(
+    (value) => typeof value === "string" && value.startsWith("T1")
+  );
+  return found ?? null;
+}
+
+// ลดโอกาสส่งซ้ำจาก webhook retry ใน instance เดียวกัน โดยไม่ใช้ฐานข้อมูล
+const recentlySent = new Map<string, number>();
+function shouldSend(psid: string, referralRef: string) {
+  const now = Date.now();
+  for (const [key, expiresAt] of recentlySent) {
+    if (expiresAt <= now) recentlySent.delete(key);
+  }
+  const key = `${psid}:${referralRef}`;
+  if (recentlySent.has(key)) return false;
+  recentlySent.set(key, now + 5 * 60_000);
+  return true;
+}
+
+async function handleReferral(psid: string, referralRef: string) {
+  const order = readMessengerTextReferralToken(referralRef);
+  if (!order) {
+    await sendText(
+      psid,
+      "ลิงก์ Mockup นี้หมดอายุหรือข้อมูลไม่ถูกต้อง กรุณากลับไปที่หน้า Mockup แล้วกดส่ง Messenger อีกครั้งค่ะ"
+    );
+    return;
+  }
+  if (!shouldSend(psid, referralRef)) return;
+  await sendText(psid, orderText(order));
+}
+
 export async function GET(request: Request) {
   const status = getMessengerMetaConfigStatus();
   if (!status.configured) {
@@ -61,7 +127,6 @@ export async function GET(request: Request) {
   if (mode === "subscribe" && token === metaConfig.webhookVerifyToken && challenge) {
     return new NextResponse(challenge, { status: 200 });
   }
-
   return new NextResponse("Forbidden", { status: 403 });
 }
 
@@ -91,44 +156,26 @@ export async function POST(request: Request) {
 
   try {
     const entries = Array.isArray(body?.entry) ? body.entry : [];
-
     for (const entry of entries) {
       const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
-
       for (const event of messaging) {
         const psid = typeof event?.sender?.id === "string" ? event.sender.id : "";
-        const incomingText = typeof event?.message?.text === "string"
-          ? event.message.text.trim()
-          : "";
-        const isEcho = Boolean(event?.message?.is_echo);
+        const referralRef = getReferralRef(event);
+        if (!psid || !referralRef) continue;
 
-        if (!psid || isEcho || !incomingText) continue;
-
-        console.log("[messenger/text-only] incoming", {
+        console.log("[messenger/referral] received", {
           psid: `${psid.slice(0, 6)}...`,
-          text: incomingText,
+          source: event?.referral?.source || event?.postback?.referral?.source || "unknown",
+          type: event?.referral?.type || event?.postback?.referral?.type || "unknown",
         });
 
-        // โหมดทดสอบข้อความอย่างเดียว: ไม่มีรูป ไม่มี PDF ไม่มี referral attachment
-        if (incomingText.startsWith("เริ่มสั่งผลิต")) {
-          await sendText(
-            psid,
-            [
-              "✅ รับข้อความแล้วค่ะ",
-              "ระบบ Messenger เชื่อมต่อสำเร็จ",
-              "Webhook รับข้อความจากลูกค้าได้ และ Meta Send API ส่งข้อความกลับเข้าแชตได้แล้ว",
-              "",
-              "ตอนนี้กำลังทดสอบเฉพาะข้อความ ยังไม่มีรูปหรือ PDF",
-              "ขั้นต่อไปเราจะเพิ่มข้อมูล Mockup / รุ่นสินค้า / จำนวน / ราคา แล้วค่อยเพิ่มรูปทีละไฟล์ค่ะ",
-            ].join("\n")
-          );
-        }
+        await handleReferral(psid, referralRef);
       }
     }
   } catch (error) {
-    console.error("[messenger/text-only] webhook error", error);
-    // ตอบ 200 เพื่อไม่ให้ Meta retry ซ้ำแบบไม่สิ้นสุด ระหว่างทดสอบให้ดู Vercel Logs
+    console.error("[messenger/referral] webhook error", error);
+    // ตอบ 200 เพื่อไม่ให้ Meta retry ซ้ำแบบไม่สิ้นสุด; ตรวจ Vercel Logs หากมีปัญหา
   }
 
-  return NextResponse.json({ ok: true, mode: "text-only-auto-reply" });
+  return NextResponse.json({ ok: true, mode: "one-click-text-referral" });
 }

@@ -1988,28 +1988,75 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    // TEXT-ONLY AUTO-REPLY TEST
-    // รอบนี้ไม่สร้าง PNG / PDF และไม่อัปโหลดไฟล์เข้า Meta
-    // เปิด Facebook Messages แล้วคัดลอก trigger สั้น ๆ ให้ผู้ใช้วางส่ง 1 ครั้ง
-    // เมื่อ Webhook ได้ข้อความนี้ จะตอบกลับผ่าน Meta Send API อัตโนมัติ
-    const triggerText = "เริ่มสั่งผลิต";
+    // ONE-CLICK TEXT REFERRAL:
+    // ไม่สร้าง PNG / PDF และไม่อัปโหลดไฟล์
+    // สร้าง signed ref ฝั่ง Server แล้วเปิด m.me?ref=...
+    // Meta จะส่ง messaging_referrals (หรือ postback.referral สำหรับ Get Started)
+    // เข้า Webhook พร้อม PSID จากนั้น Webhook ส่งข้อความ Order เข้าแชตอัตโนมัติ
+    const orderId = createOrderId();
+    const messengerPopup = window.open("about:blank", "_blank");
 
     setMessengerPackageBusy(true);
     setOrderError("");
-    setMessengerPackageStatus("กำลังเปิดแชต Adsawin Thailand และเตรียมข้อความทดสอบ...");
-
-    // เปิดก่อน await เพื่อป้องกัน browser บล็อก popup
-    window.open(MESSENGER_DESKTOP_FALLBACK_URL, "_blank", "noopener,noreferrer");
+    setMessengerPackageStatus("กำลังเตรียมลิงก์ Messenger พร้อมข้อมูลคำสั่งซื้อ...");
+    updateMessengerPopup(
+      messengerPopup,
+      "กำลังเตรียม Messenger...",
+      "กำลังสร้างลิงก์แบบปลอดภัยสำหรับส่งรายละเอียดสินค้าเข้าแชตอัตโนมัติ"
+    );
 
     try {
-      await copyMessengerSummary(triggerText);
-      setMessengerPackageStatus(
-        "คัดลอกคำว่า “เริ่มสั่งผลิต” แล้ว ✓ • ไปที่แชต กด Ctrl+V แล้วส่ง 1 ครั้ง • ระบบจะตอบกลับอัตโนมัติ"
+      const configStatus = await readMessengerConfigStatus();
+      if (!configStatus.configured) {
+        const missingText = configStatus.missing.join(", ");
+        throw new Error(`ยังเชื่อม Meta Messenger ไม่ครบ\nขาด: ${missingText}`);
+      }
+
+      const response = await fetchWithTimeout(
+        "/api/messenger/referral",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId,
+            modelId: selectedPlugId,
+            quantity: parsedOrderQuantity,
+            unitPrice: pricing.unitPrice,
+          }),
+        },
+        15_000
       );
+
+      const result = (await response.json()) as MessengerUploadResponse;
+      if (!response.ok || !result.ok || !result.referralRef) {
+        const missing = result.missing?.length ? `\nขาด: ${result.missing.join(", ")}` : "";
+        throw new Error(`${result.error || "สร้างลิงก์ Messenger ไม่สำเร็จ"}${missing}`);
+      }
+
+      setMessengerPackageStatus(
+        `พร้อมส่งข้อความอัตโนมัติ • Order ID: ${orderId} • กำลังเปิด Messenger...`
+      );
+      updateMessengerPopup(
+        messengerPopup,
+        "กำลังเปิด Messenger",
+        `Order ID: ${orderId}\nเมื่อ Meta ส่ง referral เข้า Webhook ระบบจะส่งรายละเอียดสินค้าเข้าแชตอัตโนมัติ`
+      );
+
+      window.setTimeout(() => {
+        openMessenger(result.referralRef, messengerPopup);
+      }, 150);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "คัดลอกข้อความไม่สำเร็จ";
-      setMessengerPackageStatus("เปิดแชต Adsawin Thailand แล้ว");
-      setOrderError(`${message} กรุณาพิมพ์คำว่า “เริ่มสั่งผลิต” ในแชตแล้วกดส่ง`);
+      const message = error instanceof Error
+        ? (error.name === "AbortError" ? "การเชื่อมต่อใช้เวลานานเกินไป กรุณาลองใหม่อีกครั้ง" : error.message)
+        : "เปิด Messenger ไม่สำเร็จ";
+      setMessengerPackageStatus("");
+      setOrderError(message);
+      updateMessengerPopup(
+        messengerPopup,
+        "ยังเปิด Messenger ไม่สำเร็จ",
+        message,
+        true
+      );
     } finally {
       setMessengerPackageBusy(false);
     }
@@ -3358,8 +3405,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               </div>
 
               <div className="hint" style={{ marginTop: 8 }}>
-                โหมดทดสอบข้อความอัตโนมัติ: เมื่อกดปุ่ม ระบบจะเปิดแชต Adsawin Thailand และคัดลอกคำว่า
-                <strong> “เริ่มสั่งผลิต” </strong> ให้คุณวางแล้วกดส่ง 1 ครั้ง จากนั้น Webhook จะตอบกลับเข้าแชตอัตโนมัติ
+                กดครั้งเดียว ระบบจะเปิด Messenger พร้อม <strong>ref ของ Order</strong> และส่งข้อมูลรุ่น / จำนวน / ราคาเข้าแชตอัตโนมัติผ่าน Webhook
               </div>
 
               {messengerPackageStatus && (
@@ -3367,8 +3413,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               )}
 
               <div className="hint" style={{ marginTop: 8 }}>
-                <strong>รอบนี้ยังไม่สร้างรูป ไม่สร้าง PDF และไม่อัปโหลดไฟล์เข้า Meta</strong>
-                เรากำลังทดสอบเฉพาะ Webhook + Page Access Token + Meta Send API ให้ข้อความตอบกลับอัตโนมัติผ่านก่อน
+                <strong>รอบนี้ส่งเฉพาะข้อความก่อน</strong> ยังไม่สร้างรูปและ PDF เพื่อทดสอบ one-click referral ให้ผ่านก่อน
               </div>
               <button type="button" className="btn btnGhost" style={{ marginTop: 8 }} onClick={openFacebookSessionFallback}>
                 เปิด Facebook Messages ด้วยบัญชีที่ล็อกอินอยู่ (สำรอง)
