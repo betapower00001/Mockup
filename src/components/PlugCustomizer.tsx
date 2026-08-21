@@ -1858,6 +1858,24 @@ export default function PlugCustomizer({ plugId }: Props) {
     }
   }
 
+  async function renderWithTimeout(
+    renderPromise: Promise<string | null | undefined>,
+    timeoutMs: number,
+    timeoutMessage: string
+  ) {
+    let timer = 0;
+    try {
+      return await Promise.race([
+        renderPromise,
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
+  }
+
   async function readMessengerConfigStatus() {
     const response = await fetchWithTimeout(
       "/api/messenger/status",
@@ -1885,10 +1903,10 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    // Messenger ใช้ไฟล์ PNG จาก Preview ที่สร้างไว้แล้ว
-    // ไม่สั่ง Production 3D render ซ้ำตอนกดส่ง เพื่อป้องกัน WebGL ค้าง
-    if (!productionOrderPreview) {
-      setOrderError("ยังไม่มี Production PNG กรุณารอให้ตัวอย่างไฟล์ผลิตแสดงก่อน แล้วลองส่ง Messenger อีกครั้ง");
+    const mainRender = renderRef.current;
+    const productionRender = productionRenderRef.current;
+    if (!mainRender || !productionRender) {
+      setOrderError("โมเดล Mockup หรือ Production ยังโหลดไม่พร้อม กรุณารอสักครู่แล้วลองอีกครั้ง");
       return;
     }
 
@@ -1913,11 +1931,11 @@ export default function PlugCustomizer({ plugId }: Props) {
         );
       }
 
-      setMessengerPackageStatus(`Meta พร้อม • ${configStatus.graphVersion} • กำลังเตรียมไฟล์ PNG จาก Preview...`);
+      setMessengerPackageStatus(`Meta พร้อม • ${configStatus.graphVersion} • กำลังสร้างภาพไฟล์ผลิต...`);
       updateMessengerPopup(
         messengerPopup,
         "Meta Messenger พร้อม",
-        `เชื่อมต่อ Environment แล้ว (${configStatus.graphVersion})\nกำลังเตรียม Production PNG และภาพมุมบนเอียงขวา...`
+        `เชื่อมต่อ Environment แล้ว (${configStatus.graphVersion})\nกำลังสร้าง Production PNG...`
       );
 
       const orderId = createOrderId();
@@ -1925,38 +1943,35 @@ export default function PlugCustomizer({ plugId }: Props) {
       const topRightFileName = `${orderId}-top-right.png`;
       const pdfFileName = `${orderId}-order.pdf`;
 
-      // ใช้ Production PNG ที่ Step 6 สร้างไว้แล้วโดยตรง
-      // ไม่ render Production GLB ซ้ำ ณ ตอนกด Messenger
-      const productionSrc = productionOrderPreview;
-      if (!productionSrc) {
-        throw new Error("ยังไม่มี Production PNG กรุณากดรีเฟรชตัวอย่างไฟล์ผลิต แล้วลองใหม่อีกครั้ง");
-      }
-
-      // ใช้ภาพมุมบนเอียงขวาที่ Step 5 สร้างไว้แล้วก่อน
-      // หากยังไม่มี ให้สร้าง preview ขนาดปกติเพียงครั้งเดียว (ไม่ใช้ภาพความละเอียดสูง)
-      setMessengerPackageStatus("กำลังเตรียมภาพมุมบนเอียงขวา PNG...");
-      updateMessengerPopup(
-        messengerPopup,
-        "กำลังเตรียม PNG",
-        "Production PNG พร้อมแล้ว\nกำลังเตรียมภาพมุมบนเอียงขวา PNG..."
+      const productionSrc = await renderWithTimeout(
+        productionRender({
+          transparent: true,
+          view: "top",
+          download: false,
+          width: 1800,
+          height: 1800,
+          filename: productionFileName,
+        }),
+        30_000,
+        "สร้าง Production PNG ใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
       );
+      if (!productionSrc) throw new Error("สร้างไฟล์ผลิตไม่สำเร็จ");
 
-      let topRightSrc = viewPreviewMap.topRight ?? "";
-      if (!topRightSrc) {
-        const fallbackTopRight = await Promise.race([
-          buildInlinePreview("topRight"),
-          new Promise<null>((_, reject) =>
-            window.setTimeout(
-              () => reject(new Error("สร้างภาพมุมบนเอียงขวาใช้เวลานานเกิน 20 วินาที กรุณากลับไปขั้นมุมมอง รอให้ Preview แสดง แล้วลองใหม่")),
-              20_000
-            )
-          ),
-        ]);
-        topRightSrc = fallbackTopRight ?? "";
-      }
-      if (!topRightSrc) {
-        throw new Error("ยังไม่มีภาพมุมบนเอียงขวา PNG กรุณากลับไปขั้นมุมมอง รอให้ Preview แสดง แล้วลองใหม่");
-      }
+      setMessengerPackageStatus("กำลังสร้างภาพมุมบนเอียงขวา...");
+      updateMessengerPopup(messengerPopup, "กำลังสร้างภาพ", "Production PNG สำเร็จ\nกำลังสร้างภาพมุมบนเอียงขวา...");
+      const topRightSrc = await renderWithTimeout(
+        mainRender({
+          transparent: false,
+          view: "topRight",
+          download: false,
+          width: 1600,
+          height: 1600,
+          filename: topRightFileName,
+        }),
+        30_000,
+        "สร้างภาพมุมบนเอียงขวาใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
+      );
+      if (!topRightSrc) throw new Error("สร้างภาพมุมบนเอียงขวาไม่สำเร็จ");
 
       const topLabel = getColorLabel(
         safeColors.top ?? customization.topColor,
@@ -1973,8 +1988,8 @@ export default function PlugCustomizer({ plugId }: Props) {
           )
         : undefined;
 
-      setMessengerPackageStatus("PNG พร้อม • กำลังสร้าง PDF สรุปแบบ...");
-      updateMessengerPopup(messengerPopup, "PNG พร้อมแล้ว", "Production PNG + ภาพมุมบนเอียงขวา PNG พร้อม\nกำลังรวมข้อมูลเป็น PDF สรุปแบบ...");
+      setMessengerPackageStatus("กำลังสร้าง PDF สรุปแบบ...");
+      updateMessengerPopup(messengerPopup, "กำลังสร้าง PDF", "ภาพมุมบนเอียงขวาสำเร็จ\nกำลังรวมข้อมูลเป็น PDF สรุปแบบ...");
       const pdfBlob = await createMessengerPdfBlob({
         orderId,
         modelName: plug.name ?? selectedPlugId,
@@ -1993,7 +2008,7 @@ export default function PlugCustomizer({ plugId }: Props) {
       });
 
       const pdfUrl = URL.createObjectURL(pdfBlob);
-      setMessengerPackageStatus("กำลังส่ง PNG + PDF เข้า Meta Messenger โดยตรง...");
+      setMessengerPackageStatus("กำลังส่ง PDF และรูปขึ้น Meta โดยตรง...");
       updateMessengerPopup(messengerPopup, "กำลังอัปโหลดเข้า Meta", "กำลังส่ง PDF + Production PNG + ภาพมุมบนเอียงขวาเข้า Meta Messenger...\nกรุณาอย่าปิดหน้าต่างนี้");
 
       const formData = new FormData();
@@ -2018,8 +2033,6 @@ export default function PlugCustomizer({ plugId }: Props) {
         })
       );
       formData.set("pdf", pdfBlob, pdfFileName);
-      // productionSrc / topRightSrc เป็น image/png data URL จาก Preview
-      // API จะอัปโหลด PNG เหล่านี้เข้า Meta แล้ว Webhook ส่งเข้าแชทโดยตรง
       formData.set("production", dataUrlToBlob(productionSrc), productionFileName);
       formData.set("topRight", dataUrlToBlob(topRightSrc), topRightFileName);
 
