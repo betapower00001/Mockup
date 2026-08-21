@@ -1,9 +1,5 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import {
-  readMessengerReferralToken,
-  type StatelessMessengerPayload,
-} from "@/lib/messengerReferralToken";
 import { getMessengerMetaConfigStatus, requireMessengerMetaConfig } from "@/lib/messengerMetaConfig";
 
 export const runtime = "nodejs";
@@ -21,94 +17,30 @@ function verifyMetaSignature(rawBody: string, signature: string | null, appSecre
   return safeEqual(signature, expected);
 }
 
-async function callSendApi(psid: string, message: unknown) {
+async function sendText(psid: string, text: string) {
   const metaConfig = requireMessengerMetaConfig();
 
-  const response = await fetch(`https://graph.facebook.com/${metaConfig.graphVersion}/me/messages`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${metaConfig.pageAccessToken}`,
-    },
-    signal: AbortSignal.timeout(60_000),
-    body: JSON.stringify({
-      recipient: { id: psid },
-      messaging_type: "RESPONSE",
-      message,
-    }),
-  });
+  const response = await fetch(
+    `https://graph.facebook.com/${metaConfig.graphVersion}/me/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${metaConfig.pageAccessToken}`,
+      },
+      signal: AbortSignal.timeout(30_000),
+      body: JSON.stringify({
+        recipient: { id: psid },
+        messaging_type: "RESPONSE",
+        message: { text },
+      }),
+    }
+  );
 
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Messenger Send API ${response.status}: ${body}`);
   }
-}
-
-function modelName(modelNumber: number) {
-  return ({ 1: "Arthur", 2: "Wallace", 3: "Caesar", 4: "Mulan", 5: "Hector" } as Record<number, string>)[modelNumber] || `TYPE-${modelNumber}`;
-}
-
-function priceRange(quantity: number) {
-  if (quantity <= 100) return "12-100 ชิ้น";
-  if (quantity <= 300) return "101-300 ชิ้น";
-  if (quantity <= 500) return "301-500 ชิ้น";
-  return "501-1000 ชิ้น";
-}
-
-function orderText(order: StatelessMessengerPayload) {
-  const total = order.q * order.u;
-  return [
-    "ขอบคุณที่ส่งแบบเข้ามาค่ะ",
-    `Order ID: ${order.o}`,
-    `รุ่น: TYPE-${order.m} ${modelName(order.m)}`,
-    `จำนวน: ${order.q.toLocaleString("th-TH")} ชิ้น`,
-    `ราคา/ชิ้น: ${order.u.toLocaleString("th-TH")} บาท`,
-    `ราคารวม: ${total.toLocaleString("th-TH")} บาท`,
-    `ช่วงราคา: ${priceRange(order.q)}`,
-    `ลวดลาย: ${order.p ? "มีลาย" : "ไม่มีลาย"}`,
-    `โลโก้: ${order.l} จุด`,
-    "",
-    "แนบให้แล้ว: PDF สรุปแบบ / ภาพมุมบนเอียงขวา / ไฟล์ผลิต",
-    "รายละเอียดสีและตำแหน่งงานดูได้จาก PDF และภาพแนบ",
-    "สามารถคุยรายละเอียดงานต่อในแชตนี้ได้เลยค่ะ",
-  ].join("\n");
-}
-
-async function sendAttachment(psid: string, type: "image" | "file", attachmentId: string) {
-  await callSendApi(psid, {
-    attachment: {
-      type,
-      payload: { attachment_id: attachmentId },
-    },
-  });
-}
-
-async function sendStatelessPackage(psid: string, referralRef: string) {
-  const order = readMessengerReferralToken(referralRef);
-  if (!order) {
-    await callSendApi(psid, {
-      text: "ลิงก์ Mockup นี้หมดอายุหรือข้อมูลไม่ถูกต้อง กรุณากลับไปที่หน้า Mockup แล้วกดส่ง Messenger อีกครั้งค่ะ",
-    });
-    return;
-  }
-
-  const [pdfAttachmentId, productionAttachmentId, topRightAttachmentId] = order.a;
-
-  await callSendApi(psid, { text: orderText(order) });
-  await sendAttachment(psid, "image", topRightAttachmentId);
-  await sendAttachment(psid, "image", productionAttachmentId);
-  await sendAttachment(psid, "file", pdfAttachmentId);
-}
-
-function getReferralRef(event: any): string | null {
-  const candidates = [
-    event?.referral?.ref,
-    event?.postback?.referral?.ref,
-  ];
-  const found = candidates.find(
-    (value) => typeof value === "string" && value.startsWith("S1")
-  );
-  return found ?? null;
 }
 
 export async function GET(request: Request) {
@@ -129,6 +61,7 @@ export async function GET(request: Request) {
   if (mode === "subscribe" && token === metaConfig.webhookVerifyToken && challenge) {
     return new NextResponse(challenge, { status: 200 });
   }
+
   return new NextResponse("Forbidden", { status: 403 });
 }
 
@@ -143,7 +76,9 @@ export async function POST(request: Request) {
 
   const metaConfig = requireMessengerMetaConfig();
   const rawBody = await request.text();
-  if (!verifyMetaSignature(rawBody, request.headers.get("x-hub-signature-256"), metaConfig.appSecret)) {
+  const signature = request.headers.get("x-hub-signature-256");
+
+  if (!verifyMetaSignature(rawBody, signature, metaConfig.appSecret)) {
     return new NextResponse("Invalid signature", { status: 401 });
   }
 
@@ -156,40 +91,44 @@ export async function POST(request: Request) {
 
   try {
     const entries = Array.isArray(body?.entry) ? body.entry : [];
+
     for (const entry of entries) {
       const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
+
       for (const event of messaging) {
-        const psid = event?.sender?.id;
-        const referralRef = getReferralRef(event);
+        const psid = typeof event?.sender?.id === "string" ? event.sender.id : "";
         const incomingText = typeof event?.message?.text === "string"
           ? event.message.text.trim()
           : "";
         const isEcho = Boolean(event?.message?.is_echo);
 
-        // TEXT-ONLY TEST MODE:
-        // ผู้ใช้เปิด Facebook Messages โดยตรงแล้วส่งคำว่า “ทดสอบ”
-        // จากนั้นเพจตอบกลับผ่าน Send API เพื่อพิสูจน์ว่า Webhook + Page Token + pages_messaging ใช้งานได้
-        if (psid && !isEcho && incomingText === "ทดสอบ") {
-          await callSendApi(psid, {
-            text: [
-              "✅ ระบบ Messenger เชื่อมต่อสำเร็จค่ะ",
-              "Webhook รับข้อความจาก Adsawin Thailand ได้แล้ว",
-              "และ Send API สามารถส่งข้อความตอบกลับเข้าแชตนี้ได้",
-              "",
-              "ขั้นต่อไปสามารถเพิ่ม Production PNG แล้วค่อยเพิ่มภาพมุมบนเอียงขวาและ PDF ทีละไฟล์ได้ค่ะ",
-            ].join("\n"),
-          });
-          continue;
-        }
+        if (!psid || isEcho || !incomingText) continue;
 
-        // เก็บ referral flow เดิมไว้ เผื่อกลับมาใช้หลังทดสอบข้อความผ่าน
-        if (psid && referralRef) await sendStatelessPackage(psid, referralRef);
+        console.log("[messenger/text-only] incoming", {
+          psid: `${psid.slice(0, 6)}...`,
+          text: incomingText,
+        });
+
+        // โหมดทดสอบข้อความอย่างเดียว: ไม่มีรูป ไม่มี PDF ไม่มี referral attachment
+        if (incomingText.startsWith("เริ่มสั่งผลิต")) {
+          await sendText(
+            psid,
+            [
+              "✅ รับข้อความแล้วค่ะ",
+              "ระบบ Messenger เชื่อมต่อสำเร็จ",
+              "Webhook รับข้อความจากลูกค้าได้ และ Meta Send API ส่งข้อความกลับเข้าแชตได้แล้ว",
+              "",
+              "ตอนนี้กำลังทดสอบเฉพาะข้อความ ยังไม่มีรูปหรือ PDF",
+              "ขั้นต่อไปเราจะเพิ่มข้อมูล Mockup / รุ่นสินค้า / จำนวน / ราคา แล้วค่อยเพิ่มรูปทีละไฟล์ค่ะ",
+            ].join("\n")
+          );
+        }
       }
     }
   } catch (error) {
-    console.error("[messenger/webhook]", error);
-    // Return 200 so Meta does not retry indefinitely; inspect server logs for details.
+    console.error("[messenger/text-only] webhook error", error);
+    // ตอบ 200 เพื่อไม่ให้ Meta retry ซ้ำแบบไม่สิ้นสุด ระหว่างทดสอบให้ดู Vercel Logs
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, mode: "text-only-auto-reply" });
 }

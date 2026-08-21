@@ -1988,25 +1988,28 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    // TEXT-ONLY MANUAL SEND MODE
-    // เปิด Facebook Messages จาก user gesture ทันที แล้วคัดลอกข้อความสรุปทั้งหมด
-    // เพื่อให้ผู้ใช้กด Ctrl+V / วาง และกดส่งเองในแชต
+    // TEXT-ONLY AUTO-REPLY TEST
+    // รอบนี้ไม่สร้าง PNG / PDF และไม่อัปโหลดไฟล์เข้า Meta
+    // เปิด Facebook Messages แล้วคัดลอก trigger สั้น ๆ ให้ผู้ใช้วางส่ง 1 ครั้ง
+    // เมื่อ Webhook ได้ข้อความนี้ จะตอบกลับผ่าน Meta Send API อัตโนมัติ
+    const triggerText = "เริ่มสั่งผลิต";
+
     setMessengerPackageBusy(true);
     setOrderError("");
-    setMessengerPackageStatus("โหมดข้อความอย่างเดียว • กำลังคัดลอกข้อความและเปิดแชต Adsawin Thailand...");
+    setMessengerPackageStatus("กำลังเปิดแชต Adsawin Thailand และเตรียมข้อความทดสอบ...");
 
     // เปิดก่อน await เพื่อป้องกัน browser บล็อก popup
     window.open(MESSENGER_DESKTOP_FALLBACK_URL, "_blank", "noopener,noreferrer");
 
     try {
-      await copyMessengerSummary(messengerSummaryText);
+      await copyMessengerSummary(triggerText);
       setMessengerPackageStatus(
-        "คัดลอกข้อความแล้ว ✓ • เปิดแชต Adsawin Thailand แล้ว • กด Ctrl+V หรือวาง แล้วกดส่ง"
+        "คัดลอกคำว่า “เริ่มสั่งผลิต” แล้ว ✓ • ไปที่แชต กด Ctrl+V แล้วส่ง 1 ครั้ง • ระบบจะตอบกลับอัตโนมัติ"
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "คัดลอกข้อความไม่สำเร็จ";
       setMessengerPackageStatus("เปิดแชต Adsawin Thailand แล้ว");
-      setOrderError(`${message} กรุณากดปุ่ม “คัดลอกข้อความ” แล้ววางในแชต`);
+      setOrderError(`${message} กรุณาพิมพ์คำว่า “เริ่มสั่งผลิต” ในแชตแล้วกดส่ง`);
     } finally {
       setMessengerPackageBusy(false);
     }
@@ -3355,8 +3358,8 @@ export default function PlugCustomizer({ plugId }: Props) {
               </div>
 
               <div className="hint" style={{ marginTop: 8 }}>
-                เมื่อกด “ส่งรายละเอียดไป Messenger” ระบบจะคัดลอกข้อความในกรอบนี้ให้อัตโนมัติ
-                และเปิดแชต Adsawin Thailand ทันที จากนั้นกด Ctrl+V หรือวาง แล้วกดส่งได้เลย
+                โหมดทดสอบข้อความอัตโนมัติ: เมื่อกดปุ่ม ระบบจะเปิดแชต Adsawin Thailand และคัดลอกคำว่า
+                <strong> “เริ่มสั่งผลิต” </strong> ให้คุณวางแล้วกดส่ง 1 ครั้ง จากนั้น Webhook จะตอบกลับเข้าแชตอัตโนมัติ
               </div>
 
               {messengerPackageStatus && (
@@ -3364,8 +3367,8 @@ export default function PlugCustomizer({ plugId }: Props) {
               )}
 
               <div className="hint" style={{ marginTop: 8 }}>
-                โหมดทดสอบข้อความอย่างเดียว: <strong>ยังไม่สร้างรูป ยังไม่สร้าง PDF และยังไม่อัปโหลดไฟล์เข้า Meta</strong>
-                ระบบจะคัดลอกเฉพาะข้อความสรุปด้านบน แล้วเปิดแชต Adsawin Thailand ให้คุณวางข้อความและกดส่งเอง
+                <strong>รอบนี้ยังไม่สร้างรูป ไม่สร้าง PDF และไม่อัปโหลดไฟล์เข้า Meta</strong>
+                เรากำลังทดสอบเฉพาะ Webhook + Page Access Token + Meta Send API ให้ข้อความตอบกลับอัตโนมัติผ่านก่อน
               </div>
               <button type="button" className="btn btnGhost" style={{ marginTop: 8 }} onClick={openFacebookSessionFallback}>
                 เปิด Facebook Messages ด้วยบัญชีที่ล็อกอินอยู่ (สำรอง)
