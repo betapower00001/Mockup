@@ -161,6 +161,28 @@ export async function POST(request: Request) {
       for (const event of messaging) {
         const psid = event?.sender?.id;
         const referralRef = getReferralRef(event);
+        const incomingText = typeof event?.message?.text === "string"
+          ? event.message.text.trim()
+          : "";
+        const isEcho = Boolean(event?.message?.is_echo);
+
+        // TEXT-ONLY TEST MODE:
+        // ผู้ใช้เปิด Facebook Messages โดยตรงแล้วส่งคำว่า “ทดสอบ”
+        // จากนั้นเพจตอบกลับผ่าน Send API เพื่อพิสูจน์ว่า Webhook + Page Token + pages_messaging ใช้งานได้
+        if (psid && !isEcho && incomingText === "ทดสอบ") {
+          await callSendApi(psid, {
+            text: [
+              "✅ ระบบ Messenger เชื่อมต่อสำเร็จค่ะ",
+              "Webhook รับข้อความจาก Adsawin Thailand ได้แล้ว",
+              "และ Send API สามารถส่งข้อความตอบกลับเข้าแชตนี้ได้",
+              "",
+              "ขั้นต่อไปสามารถเพิ่ม Production PNG แล้วค่อยเพิ่มภาพมุมบนเอียงขวาและ PDF ทีละไฟล์ได้ค่ะ",
+            ].join("\n"),
+          });
+          continue;
+        }
+
+        // เก็บ referral flow เดิมไว้ เผื่อกลับมาใช้หลังทดสอบข้อความผ่าน
         if (psid && referralRef) await sendStatelessPackage(psid, referralRef);
       }
     }
