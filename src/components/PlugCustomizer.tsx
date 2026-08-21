@@ -41,7 +41,64 @@ export type LogoItem = {
   transform: LogoTransform;
 };
 
-type StepId = "model" | "color" | "pattern" | "logo" | "view";
+type CustomerInfo = {
+  name: string;
+  phone: string;
+  company: string;
+  lineOrEmail: string;
+};
+
+type ShippingInfo = {
+  recipientName: string;
+  phone: string;
+  address: string;
+  postalCode: string;
+};
+
+type PaymentMethod = "bank-transfer" | "invoice" | "contact-first";
+type ContinuationChoice = "" | "order" | "messenger";
+
+type PricingBreakdown = {
+  unitPrice: number;
+  totalPrice: number;
+  currency: string;
+  pricingReady: boolean;
+  minQty: number;
+  maxQty: number;
+  message: string;
+};
+
+type PriceTier = {
+  min: number;
+  max: number;
+  unitPrice: number;
+};
+
+type ProductionOrderSnapshot = {
+  orderId: string;
+  createdAt: string;
+  designSignature: string;
+  plugId: string;
+  plugName: string;
+  quantity: number;
+  note: string;
+  colors: Partial<Record<ColorKey, string>>;
+  pattern: {
+    url: string;
+    transform: PatternTransform;
+    rotation: number;
+  };
+  logos: LogoItem[];
+  productionFileName: string;
+  productionSize: { width: number; height: number };
+  pricing: PricingBreakdown;
+  contact: CustomerInfo;
+  shipping: ShippingInfo;
+  paymentMethod: PaymentMethod;
+  flow: "direct-order";
+};
+
+type StepId = "model" | "color" | "pattern" | "logo" | "view" | "order";
 type OrbitNudgeDirection = "left" | "right" | "up" | "down";
 
 /* =========================
@@ -54,6 +111,7 @@ const STEPS: { id: StepId; title: string; sub: string }[] = [
   { id: "pattern", title: "3) เลือกลาย", sub: "เลือกลวดลาย + เลื่อน/ซูม/หมุน" },
   { id: "logo", title: "4) ใส่โลโก้", sub: "อัปโหลด 3 ตำแหน่ง + ปรับแต่ง" },
   { id: "view", title: "5) มุมมอง", sub: "เลือกมุมมองสำหรับโชว์/ดาวน์โหลด" },
+  { id: "order", title: "6) ตรวจแบบ & สั่งผลิต", sub: "ตรวจข้อมูล ยืนยันแบบ และสร้างไฟล์ผลิต" },
 ];
 
 const DEFAULT_CUSTOMIZATION: CustomizationState = {
@@ -81,6 +139,57 @@ const DEFAULT_PATTERN_TRANSFORM: PatternTransform = {
   x: 0.5,
   y: 0.5,
   zoom: 1,
+};
+
+const DEFAULT_CUSTOMER_INFO: CustomerInfo = {
+  name: "",
+  phone: "",
+  company: "",
+  lineOrEmail: "",
+};
+
+const DEFAULT_SHIPPING_INFO: ShippingInfo = {
+  recipientName: "",
+  phone: "",
+  address: "",
+  postalCode: "",
+};
+
+const FACEBOOK_PAGE_USERNAME = "adsawinthailand";
+const MESSENGER_REFERRAL_URL = `https://m.me/${FACEBOOK_PAGE_USERNAME}`;
+const MESSENGER_DESKTOP_FALLBACK_URL = `https://www.facebook.com/messages/t/${FACEBOOK_PAGE_USERNAME}`;
+
+const PRICE_TIERS: Record<string, PriceTier[]> = {
+  "TYPE-1": [
+    { min: 12, max: 100, unitPrice: 389 },
+    { min: 101, max: 300, unitPrice: 369 },
+    { min: 301, max: 500, unitPrice: 359 },
+    { min: 501, max: 1000, unitPrice: 349 },
+  ],
+  "TYPE-2": [
+    { min: 12, max: 100, unitPrice: 419 },
+    { min: 101, max: 300, unitPrice: 399 },
+    { min: 301, max: 500, unitPrice: 389 },
+    { min: 501, max: 1000, unitPrice: 379 },
+  ],
+  "TYPE-3": [
+    { min: 12, max: 100, unitPrice: 279 },
+    { min: 101, max: 300, unitPrice: 269 },
+    { min: 301, max: 500, unitPrice: 259 },
+    { min: 501, max: 1000, unitPrice: 249 },
+  ],
+  "TYPE-4": [
+    { min: 12, max: 100, unitPrice: 219 },
+    { min: 101, max: 300, unitPrice: 209 },
+    { min: 301, max: 500, unitPrice: 199 },
+    { min: 501, max: 1000, unitPrice: 189 },
+  ],
+  "TYPE-5": [
+    { min: 12, max: 100, unitPrice: 349 },
+    { min: 101, max: 300, unitPrice: 335 },
+    { min: 301, max: 500, unitPrice: 325 },
+    { min: 501, max: 1000, unitPrice: 315 },
+  ],
 };
 
 type ColorOption = { label: string; value: string };
@@ -1109,6 +1218,267 @@ function normalizeRad(r: number) {
   return x;
 }
 
+type MessengerPackageFiles = {
+  orderId: string;
+  pdfUrl: string;
+  pdfFileName: string;
+  productionUrl: string;
+  productionFileName: string;
+  topRightUrl: string;
+  topRightFileName: string;
+};
+
+type MessengerUploadResponse = {
+  ok: boolean;
+  orderId?: string;
+  referralRef?: string;
+  error?: string;
+  code?: string;
+  missing?: string[];
+};
+
+type MessengerConfigStatus = {
+  ok: boolean;
+  configured: boolean;
+  missing: string[];
+  graphVersion: string;
+  referralMaxAgeSeconds: number;
+  message?: string;
+};
+
+type MessengerPdfInput = {
+  orderId: string;
+  modelName: string;
+  modelId: string;
+  quantity: number;
+  unitPrice: string;
+  totalPrice: string;
+  priceRange: string;
+  topColor: string;
+  bottomColor: string;
+  switchColor?: string;
+  patternText: string;
+  logoText: string;
+  topRightSrc: string;
+  productionSrc: string;
+};
+
+function loadDataUrlImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("โหลดรูปสำหรับ PDF ไม่สำเร็จ"));
+    img.src = src;
+  });
+}
+
+function drawImageContain(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+) {
+  const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+  const drawWidth = image.naturalWidth * scale;
+  const drawHeight = image.naturalHeight * scale;
+  const dx = x + (width - drawWidth) / 2;
+  const dy = y + (height - drawHeight) / 2;
+  ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
+}
+
+function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.92) {
+  return new Promise<Uint8Array>((resolve, reject) => {
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) {
+          reject(new Error("สร้างหน้า PDF ไม่สำเร็จ"));
+          return;
+        }
+        resolve(new Uint8Array(await blob.arrayBuffer()));
+      },
+      "image/jpeg",
+      quality
+    );
+  });
+}
+
+function asciiBytes(value: string) {
+  return new TextEncoder().encode(value);
+}
+
+function concatByteArrays(parts: Uint8Array[]) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+function createImageOnlyPdf(pages: { jpeg: Uint8Array; width: number; height: number }[]) {
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const objectBodies: Uint8Array[] = [];
+
+  const pageObjectNumbers: number[] = [];
+  const imageObjectNumbers: number[] = [];
+  const contentObjectNumbers: number[] = [];
+
+  let nextObject = 3;
+  pages.forEach(() => {
+    pageObjectNumbers.push(nextObject++);
+    imageObjectNumbers.push(nextObject++);
+    contentObjectNumbers.push(nextObject++);
+  });
+
+  objectBodies[0] = asciiBytes("<< /Type /Catalog /Pages 2 0 R >>");
+  objectBodies[1] = asciiBytes(
+    `<< /Type /Pages /Count ${pages.length} /Kids [${pageObjectNumbers.map((n) => `${n} 0 R`).join(" ")}] >>`
+  );
+
+  pages.forEach((page, index) => {
+    const pageObject = pageObjectNumbers[index];
+    const imageObject = imageObjectNumbers[index];
+    const contentObject = contentObjectNumbers[index];
+    const imageName = `Im${index + 1}`;
+
+    objectBodies[pageObject - 1] = asciiBytes(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /${imageName} ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`
+    );
+
+    const imageHeader = asciiBytes(
+      `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>\nstream\n`
+    );
+    const imageFooter = asciiBytes("\nendstream");
+    objectBodies[imageObject - 1] = concatByteArrays([imageHeader, page.jpeg, imageFooter]);
+
+    const content = asciiBytes(`q\n${pageWidth} 0 0 ${pageHeight} 0 0 cm\n/${imageName} Do\nQ\n`);
+    objectBodies[contentObject - 1] = concatByteArrays([
+      asciiBytes(`<< /Length ${content.length} >>\nstream\n`),
+      content,
+      asciiBytes("endstream"),
+    ]);
+  });
+
+  const header = asciiBytes("%PDF-1.4\n");
+  const chunks: Uint8Array[] = [header];
+  const offsets: number[] = [0];
+  let byteOffset = header.length;
+
+  objectBodies.forEach((body, index) => {
+    const objectNumber = index + 1;
+    const wrapped = concatByteArrays([
+      asciiBytes(`${objectNumber} 0 obj\n`),
+      body,
+      asciiBytes("\nendobj\n"),
+    ]);
+    offsets[objectNumber] = byteOffset;
+    chunks.push(wrapped);
+    byteOffset += wrapped.length;
+  });
+
+  const xrefOffset = byteOffset;
+  let xref = `xref\n0 ${objectBodies.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= objectBodies.length; i += 1) {
+    xref += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  }
+  xref += `trailer\n<< /Size ${objectBodies.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  chunks.push(asciiBytes(xref));
+
+  return new Blob([concatByteArrays(chunks)], { type: "application/pdf" });
+}
+
+async function createMessengerPdfBlob(input: MessengerPdfInput) {
+  const [topRightImage, productionImage] = await Promise.all([
+    loadDataUrlImage(input.topRightSrc),
+    loadDataUrlImage(input.productionSrc),
+  ]);
+
+  const width = 1240;
+  const height = 1754;
+  const margin = 78;
+
+  const page1 = document.createElement("canvas");
+  page1.width = width;
+  page1.height = height;
+  const ctx1 = page1.getContext("2d");
+  if (!ctx1) throw new Error("สร้าง Canvas สำหรับ PDF ไม่สำเร็จ");
+
+  ctx1.fillStyle = "#ffffff";
+  ctx1.fillRect(0, 0, width, height);
+  ctx1.fillStyle = "#0f172a";
+  ctx1.font = "700 46px Arial, Tahoma, sans-serif";
+  ctx1.fillText("ADS AWIN PLUG - MOCKUP ORDER", margin, 92);
+  ctx1.font = "700 30px Arial, Tahoma, sans-serif";
+  ctx1.fillText(`Order ID: ${input.orderId}`, margin, 144);
+
+  ctx1.fillStyle = "#f8fafc";
+  ctx1.fillRect(margin, 184, width - margin * 2, 365);
+  ctx1.strokeStyle = "#e2e8f0";
+  ctx1.strokeRect(margin, 184, width - margin * 2, 365);
+
+  const rows = [
+    ["รุ่นสินค้า", `${input.modelName} (${input.modelId})`],
+    ["จำนวน", `${input.quantity.toLocaleString("th-TH")} ชิ้น`],
+    ["ช่วงราคา", input.priceRange],
+    ["ราคาต่อชิ้น", input.unitPrice],
+    ["ราคารวม", input.totalPrice],
+    ["สี", `บน ${input.topColor} / ล่าง ${input.bottomColor}${input.switchColor ? ` / สวิตช์ ${input.switchColor}` : ""}`],
+    ["ลวดลาย / โลโก้", `${input.patternText} / ${input.logoText}`],
+  ];
+
+  rows.forEach(([label, value], index) => {
+    const y = 226 + index * 46;
+    ctx1.fillStyle = "#64748b";
+    ctx1.font = "700 23px Arial, Tahoma, sans-serif";
+    ctx1.fillText(label, margin + 28, y);
+    ctx1.fillStyle = "#0f172a";
+    ctx1.font = "600 23px Arial, Tahoma, sans-serif";
+    ctx1.fillText(value, margin + 280, y);
+  });
+
+  ctx1.fillStyle = "#0f172a";
+  ctx1.font = "700 30px Arial, Tahoma, sans-serif";
+  ctx1.fillText("มุมบนเอียงขวา", margin, 612);
+  ctx1.fillStyle = "#f8fafc";
+  ctx1.fillRect(margin, 644, width - margin * 2, 900);
+  drawImageContain(ctx1, topRightImage, margin + 20, 664, width - margin * 2 - 40, 860);
+
+  ctx1.fillStyle = "#64748b";
+  ctx1.font = "500 20px Arial, Tahoma, sans-serif";
+  ctx1.fillText("สร้างจากระบบ Mockup - ใช้ตรวจสอบแบบก่อนผลิต", margin, height - 72);
+
+  const page2 = document.createElement("canvas");
+  page2.width = width;
+  page2.height = height;
+  const ctx2 = page2.getContext("2d");
+  if (!ctx2) throw new Error("สร้าง Canvas สำหรับ PDF ไม่สำเร็จ");
+
+  ctx2.fillStyle = "#ffffff";
+  ctx2.fillRect(0, 0, width, height);
+  ctx2.fillStyle = "#0f172a";
+  ctx2.font = "700 46px Arial, Tahoma, sans-serif";
+  ctx2.fillText("PRODUCTION FILE", margin, 92);
+  ctx2.font = "700 28px Arial, Tahoma, sans-serif";
+  ctx2.fillText(`Order ID: ${input.orderId}`, margin, 142);
+  ctx2.fillStyle = "#f8fafc";
+  ctx2.fillRect(margin, 190, width - margin * 2, 1410);
+  drawImageContain(ctx2, productionImage, margin + 30, 220, width - margin * 2 - 60, 1350);
+  ctx2.fillStyle = "#64748b";
+  ctx2.font = "500 20px Arial, Tahoma, sans-serif";
+  ctx2.fillText("ไฟล์สำหรับอ้างอิงการผลิต - กรุณาตรวจสอบ Order ID ให้ตรงกัน", margin, height - 72);
+
+  const [jpeg1, jpeg2] = await Promise.all([canvasToJpegBytes(page1), canvasToJpegBytes(page2)]);
+  return createImageOnlyPdf([
+    { jpeg: jpeg1, width, height },
+    { jpeg: jpeg2, width, height },
+  ]);
+}
+
 /* =========================
    Component
 ========================= */
@@ -1137,6 +1507,24 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [mobileAccordionOpen, setMobileAccordionOpen] = useState(true);
   const [viewPreviewMap, setViewPreviewMap] = useState<Partial<Record<RenderViewName, string>>>({});
   const [viewPreviewLoading, setViewPreviewLoading] = useState(false);
+
+  const [productionReady, setProductionReady] = useState(false);
+  const [productionOrderPreview, setProductionOrderPreview] = useState("");
+  const [productionOrderPreviewLoading, setProductionOrderPreviewLoading] = useState(false);
+  const [orderQuantity, setOrderQuantity] = useState("12");
+  const [orderNote, setOrderNote] = useState("");
+  const [orderConfirmed, setOrderConfirmed] = useState(false);
+  const [orderBusy, setOrderBusy] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [orderSnapshot, setOrderSnapshot] = useState<ProductionOrderSnapshot | null>(null);
+  const [continuationChoice, setContinuationChoice] = useState<ContinuationChoice>("");
+  const [customerInfo, setCustomerInfo] = useState<CustomerInfo>(DEFAULT_CUSTOMER_INFO);
+  const [shippingInfo, setShippingInfo] = useState<ShippingInfo>(DEFAULT_SHIPPING_INFO);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("contact-first");
+  const [messengerCopied, setMessengerCopied] = useState(false);
+  const [messengerPackageBusy, setMessengerPackageBusy] = useState(false);
+  const [messengerPackageStatus, setMessengerPackageStatus] = useState("");
+  const [messengerPackageFiles, setMessengerPackageFiles] = useState<MessengerPackageFiles | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1204,6 +1592,60 @@ export default function PlugCustomizer({ plugId }: Props) {
   const hasLogo = logos.some((l) => l.url !== "");
   const hasPattern = !!customization.patternUrl && customization.patternUrl.trim() !== "";
   const currentStepIdx = stepIndex(step);
+  const parsedOrderQuantity = Math.max(0, Math.floor(Number(orderQuantity) || 0));
+  const logoCount = logos.filter((logo) => !!logo.url).length;
+
+  const pricing = useMemo<PricingBreakdown>(() => {
+    const tiers = PRICE_TIERS[selectedPlugId] ?? [];
+    const tier = tiers.find((item) => parsedOrderQuantity >= item.min && parsedOrderQuantity <= item.max);
+
+    if (parsedOrderQuantity < 12) {
+      return { unitPrice: 0, totalPrice: 0, currency: "THB", pricingReady: false, minQty: 12, maxQty: 1000, message: "ขั้นต่ำในการสั่งผลิต 12 ชิ้น" };
+    }
+
+    if (parsedOrderQuantity > 1000) {
+      return { unitPrice: 0, totalPrice: 0, currency: "THB", pricingReady: false, minQty: 12, maxQty: 1000, message: "จำนวนมากกว่า 1,000 ชิ้น กรุณาติดต่อเพื่อขอราคา" };
+    }
+
+    if (!tier) {
+      return { unitPrice: 0, totalPrice: 0, currency: "THB", pricingReady: false, minQty: 12, maxQty: 1000, message: "ไม่พบช่วงราคาสำหรับจำนวนนี้" };
+    }
+
+    return {
+      unitPrice: tier.unitPrice,
+      totalPrice: tier.unitPrice * parsedOrderQuantity,
+      currency: "THB",
+      pricingReady: true,
+      minQty: tier.min,
+      maxQty: tier.max,
+      message: `ช่วงราคา ${tier.min}-${tier.max} ชิ้น`,
+    };
+  }, [selectedPlugId, parsedOrderQuantity]);
+
+  const orderDesignSignature = useMemo(
+    () =>
+      JSON.stringify({
+        selectedPlugId,
+        topColor: safeColors.top ?? customization.topColor,
+        bottomColor: safeColors.bottom ?? customization.bottomColor,
+        switchColor: safeColors.switch ?? customization.switchColor,
+        patternUrl: customization.patternUrl,
+        patternTransform,
+        patternRotation,
+        logos,
+      }),
+    [
+      selectedPlugId,
+      safeColors,
+      customization.topColor,
+      customization.bottomColor,
+      customization.switchColor,
+      customization.patternUrl,
+      patternTransform,
+      patternRotation,
+      logos,
+    ]
+  );
 
   const showQuickBottom = true;
   const showQuickSwitch =
@@ -1212,6 +1654,545 @@ export default function PlugCustomizer({ plugId }: Props) {
     selectedPlugId !== "TYPE-4";
 
   const quickColorCount = 1 + (showQuickBottom ? 1 : 0) + (showQuickSwitch ? 1 : 0);
+
+  useEffect(() => {
+    if (!orderSnapshot) return;
+
+    const currentNote = orderNote.trim();
+    const contactChanged = JSON.stringify(orderSnapshot.contact) !== JSON.stringify(customerInfo);
+    const shippingChanged = JSON.stringify(orderSnapshot.shipping) !== JSON.stringify(shippingInfo);
+    const pricingChanged = orderSnapshot.pricing.totalPrice !== pricing.totalPrice || orderSnapshot.pricing.unitPrice !== pricing.unitPrice;
+
+    if (
+      orderSnapshot.designSignature !== orderDesignSignature ||
+      orderSnapshot.quantity !== parsedOrderQuantity ||
+      orderSnapshot.note !== currentNote ||
+      orderSnapshot.paymentMethod !== paymentMethod ||
+      contactChanged ||
+      shippingChanged ||
+      pricingChanged
+    ) {
+      setOrderSnapshot(null);
+      setOrderConfirmed(false);
+    }
+  }, [
+    orderSnapshot,
+    orderDesignSignature,
+    parsedOrderQuantity,
+    orderNote,
+    customerInfo,
+    shippingInfo,
+    paymentMethod,
+    pricing.totalPrice,
+    pricing.unitPrice,
+  ]);
+
+  useEffect(() => {
+    if (step !== "order") return;
+
+    const timer = window.setTimeout(() => {
+      void refreshProductionOrderPreview();
+    }, 140);
+
+    return () => window.clearTimeout(timer);
+  }, [step, orderDesignSignature, productionReady]);
+
+  function downloadDataUrl(src: string, filename: string) {
+    if (!src) return;
+    const link = document.createElement("a");
+    link.href = src;
+    link.download = filename;
+    link.click();
+  }
+
+  function createOrderId() {
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const randomPart = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
+    return `PAC-${datePart}-${timePart}-${randomPart}`;
+  }
+
+  function formatPrice(value: number) {
+    return new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", maximumFractionDigits: 0 }).format(value);
+  }
+
+  function updateCustomerInfo<K extends keyof CustomerInfo>(key: K, value: CustomerInfo[K]) {
+    setCustomerInfo((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateShippingInfo<K extends keyof ShippingInfo>(key: K, value: ShippingInfo[K]) {
+    setShippingInfo((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function buildMessengerSummary(orderId?: string) {
+    const fileNote = orderId
+      ? [
+          "",
+          `Order ID: ${orderId}`,
+          "ระบบจะส่งรายละเอียด + PDF + มุมบนเอียงขวา + ไฟล์ผลิตเข้าห้องแชตอัตโนมัติ",
+          "ระบบนี้ไม่เก็บ Order หรือไฟล์ไว้ในฐานข้อมูลของเว็บ",
+        ]
+      : [];
+
+    return [
+      "สนใจสั่งผลิตสินค้า",
+      `Mockup: ${plug.name ?? selectedPlugId}`,
+      `รุ่นสินค้า: ${selectedPlugId}`,
+      `จำนวน: ${parsedOrderQuantity || 0} ชิ้น`,
+      `ราคา/ชิ้น: ${pricing.pricingReady ? formatPrice(pricing.unitPrice) : pricing.message}`,
+      `ราคารวม: ${pricing.pricingReady ? formatPrice(pricing.totalPrice) : pricing.message}`,
+      ...fileNote,
+    ].join("\n");
+  }
+
+  const messengerSummaryText = buildMessengerSummary(messengerPackageFiles?.orderId);
+
+  async function copyMessengerSummary(text = messengerSummaryText) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+      setMessengerCopied(true);
+      window.setTimeout(() => setMessengerCopied(false), 1800);
+    } catch {
+      // fallback สำหรับ browser/mobile บางรุ่นที่ไม่อนุญาต Clipboard หลัง async render
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+        setMessengerCopied(true);
+        window.setTimeout(() => setMessengerCopied(false), 1800);
+      } catch {
+        setOrderError("คัดลอกข้อความสำหรับ Messenger ไม่สำเร็จ กรุณาคัดลอกข้อความจากกล่องสรุปด้วยตนเอง");
+      }
+    }
+  }
+
+  function dataUrlToBlob(src: string) {
+    const [meta, encoded] = src.split(",", 2);
+    if (!meta || !encoded) throw new Error("รูปที่สร้างไม่ใช่ Data URL ที่ถูกต้อง");
+    const mime = /data:([^;]+)/.exec(meta)?.[1] || "application/octet-stream";
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  }
+
+  function openMessenger(referralRef?: string, popup?: Window | null) {
+    const referral = encodeURIComponent(referralRef || `mockup-${selectedPlugId}`);
+
+    // Stateless flow: ref contains a signed, short-lived payload + Meta attachment IDs.
+    // Webhook verifies the signature and sends the package without reading any database.
+    const url = `${MESSENGER_REFERRAL_URL}?ref=${referral}`;
+
+    if (popup && !popup.closed) {
+      popup.location.replace(url);
+      return;
+    }
+
+    window.location.href = url;
+  }
+
+  function openFacebookSessionFallback() {
+    window.open(MESSENGER_DESKTOP_FALLBACK_URL, "_blank", "noopener,noreferrer");
+  }
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 3000);
+  }
+
+  function escapePopupHtml(value: string) {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function updateMessengerPopup(
+    popup: Window | null,
+    title: string,
+    detail = "",
+    isError = false
+  ) {
+    if (!popup || popup.closed) return;
+    const accent = isError ? "#b91c1c" : "#0f172a";
+    const panel = isError ? "#fef2f2" : "#f8fafc";
+    const border = isError ? "#fecaca" : "#e2e8f0";
+    const safeTitle = escapePopupHtml(title);
+    const safeDetail = escapePopupHtml(detail);
+    popup.document.title = title;
+    popup.document.body.innerHTML = `
+      <main style="font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:24px;color:#0f172a">
+        <div style="border:1px solid ${border};background:${panel};border-radius:16px;padding:22px">
+          <div style="font-size:18px;font-weight:800;color:${accent};margin-bottom:10px">${safeTitle}</div>
+          ${safeDetail ? `<div style="font-size:14px;line-height:1.65;white-space:pre-wrap;color:#475569">${safeDetail}</div>` : ""}
+          ${isError ? '<button onclick="window.close()" style="margin-top:18px;border:0;border-radius:10px;padding:10px 16px;background:#0f172a;color:#fff;font-weight:700;cursor:pointer">ปิดหน้าต่าง</button>' : ""}
+        </div>
+      </main>`;
+  }
+
+  async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 60_000) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...init, signal: controller.signal });
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  async function readMessengerConfigStatus() {
+    const response = await fetchWithTimeout(
+      "/api/messenger/status",
+      { method: "GET", cache: "no-store" },
+      10_000
+    );
+    const result = (await response.json()) as MessengerConfigStatus;
+    if (!response.ok || !result.ok) {
+      throw new Error(result.message || "ตรวจสอบการตั้งค่า Meta Messenger ไม่สำเร็จ");
+    }
+    return result;
+  }
+
+  async function createMessengerPackageAndOpen() {
+    if (parsedOrderQuantity < 12) {
+      setOrderError("ขั้นต่ำในการสั่งผลิต 12 ชิ้น");
+      return;
+    }
+    if (parsedOrderQuantity > 1000) {
+      setOrderError("จำนวนมากกว่า 1,000 ชิ้น กรุณาติดต่อเพื่อขอราคา");
+      return;
+    }
+    if (!pricing.pricingReady) {
+      setOrderError(pricing.message || "ไม่สามารถคำนวณราคาได้");
+      return;
+    }
+
+    const mainRender = renderRef.current;
+    const productionRender = productionRenderRef.current;
+    if (!mainRender || !productionRender) {
+      setOrderError("โมเดล Mockup หรือ Production ยังโหลดไม่พร้อม กรุณารอสักครู่แล้วลองอีกครั้ง");
+      return;
+    }
+
+    // เปิดหน้าต่างทันทีจาก user gesture เพื่อไม่ให้ browser บล็อก popup หลัง await
+    const messengerPopup = window.open("about:blank", "_blank");
+    updateMessengerPopup(
+      messengerPopup,
+      "กำลังตรวจสอบ Meta Messenger...",
+      "ระบบกำลังตรวจสอบ META_PAGE_ACCESS_TOKEN, META_APP_SECRET และ META_WEBHOOK_VERIFY_TOKEN ก่อนสร้างไฟล์"
+    );
+
+    setMessengerPackageBusy(true);
+    setMessengerPackageStatus("กำลังตรวจสอบการตั้งค่า Meta Messenger...");
+    setOrderError("");
+
+    try {
+      const configStatus = await readMessengerConfigStatus();
+      if (!configStatus.configured) {
+        const missingText = configStatus.missing.join(", ");
+        throw new Error(
+          `ยังเชื่อม Meta Messenger ไม่ครบ\nขาด: ${missingText}\n\nใส่ค่าใน .env.local แล้ว Restart ด้วย npm run dev ใหม่อีกครั้ง`
+        );
+      }
+
+      setMessengerPackageStatus(`Meta พร้อม • ${configStatus.graphVersion} • กำลังสร้างภาพไฟล์ผลิต...`);
+      updateMessengerPopup(
+        messengerPopup,
+        "Meta Messenger พร้อม",
+        `เชื่อมต่อ Environment แล้ว (${configStatus.graphVersion})\nกำลังสร้าง Production PNG...`
+      );
+
+      const orderId = createOrderId();
+      const productionFileName = `${orderId}-production.png`;
+      const topRightFileName = `${orderId}-top-right.png`;
+      const pdfFileName = `${orderId}-order.pdf`;
+
+      const productionSrc = await productionRender({
+        transparent: true,
+        view: "top",
+        download: false,
+        width: 3000,
+        height: 3000,
+        filename: productionFileName,
+      });
+      if (!productionSrc) throw new Error("สร้างไฟล์ผลิตไม่สำเร็จ");
+
+      setMessengerPackageStatus("กำลังสร้างภาพมุมบนเอียงขวา...");
+      updateMessengerPopup(messengerPopup, "กำลังสร้างภาพ", "Production PNG สำเร็จ\nกำลังสร้างภาพมุมบนเอียงขวา...");
+      const topRightSrc = await mainRender({
+        transparent: false,
+        view: "topRight",
+        download: false,
+        width: 2400,
+        height: 2400,
+        filename: topRightFileName,
+      });
+      if (!topRightSrc) throw new Error("สร้างภาพมุมบนเอียงขวาไม่สำเร็จ");
+
+      const topLabel = getColorLabel(
+        safeColors.top ?? customization.topColor,
+        currentColorOptions.top
+      );
+      const bottomLabel = getColorLabel(
+        safeColors.bottom ?? customization.bottomColor,
+        currentColorOptions.bottom
+      );
+      const switchLabel = showQuickSwitch
+        ? getColorLabel(
+            safeColors.switch ?? customization.switchColor,
+            currentColorOptions.switch ?? currentColorOptions.top
+          )
+        : undefined;
+
+      setMessengerPackageStatus("กำลังสร้าง PDF สรุปแบบ...");
+      updateMessengerPopup(messengerPopup, "กำลังสร้าง PDF", "ภาพมุมบนเอียงขวาสำเร็จ\nกำลังรวมข้อมูลเป็น PDF สรุปแบบ...");
+      const pdfBlob = await createMessengerPdfBlob({
+        orderId,
+        modelName: plug.name ?? selectedPlugId,
+        modelId: selectedPlugId,
+        quantity: parsedOrderQuantity,
+        unitPrice: formatPrice(pricing.unitPrice),
+        totalPrice: formatPrice(pricing.totalPrice),
+        priceRange: `${pricing.minQty}-${pricing.maxQty} ชิ้น`,
+        topColor: topLabel,
+        bottomColor: bottomLabel,
+        switchColor: switchLabel,
+        patternText: hasPattern ? "มีลาย" : "ไม่มีลาย",
+        logoText: `${logoCount} จุด`,
+        topRightSrc,
+        productionSrc,
+      });
+
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      setMessengerPackageStatus("กำลังส่ง PDF และรูปขึ้น Meta โดยตรง...");
+      updateMessengerPopup(messengerPopup, "กำลังอัปโหลดเข้า Meta", "กำลังส่ง PDF + Production PNG + ภาพมุมบนเอียงขวาเข้า Meta Messenger...\nกรุณาอย่าปิดหน้าต่างนี้");
+
+      const formData = new FormData();
+      formData.set(
+        "metadata",
+        JSON.stringify({
+          orderId,
+          createdAt: new Date().toISOString(),
+          modelId: selectedPlugId,
+          modelName: plug.name ?? selectedPlugId,
+          quantity: parsedOrderQuantity,
+          unitPrice: pricing.unitPrice,
+          totalPrice: pricing.totalPrice,
+          priceRange: `${pricing.minQty}-${pricing.maxQty} ชิ้น`,
+          topColor: topLabel,
+          bottomColor: bottomLabel,
+          switchColor: switchLabel,
+          patternText: hasPattern ? "มีลาย" : "ไม่มีลาย",
+          logoText: `${logoCount} จุด`,
+          hasPattern,
+          logoCount,
+        })
+      );
+      formData.set("pdf", pdfBlob, pdfFileName);
+      formData.set("production", dataUrlToBlob(productionSrc), productionFileName);
+      formData.set("topRight", dataUrlToBlob(topRightSrc), topRightFileName);
+
+      const uploadResponse = await fetchWithTimeout(
+        "/api/messenger/package",
+        { method: "POST", body: formData },
+        120_000
+      );
+      const uploadResult = (await uploadResponse.json()) as MessengerUploadResponse;
+      if (!uploadResponse.ok || !uploadResult.ok || !uploadResult.referralRef) {
+        const missing = uploadResult.missing?.length ? `\nขาด: ${uploadResult.missing.join(", ")}` : "";
+        throw new Error(`${uploadResult.error || "เตรียมชุดไฟล์ Messenger ไม่สำเร็จ"}${missing}`);
+      }
+
+      const nextFiles: MessengerPackageFiles = {
+        orderId,
+        pdfUrl,
+        pdfFileName,
+        productionUrl: productionSrc,
+        productionFileName,
+        topRightUrl: topRightSrc,
+        topRightFileName,
+      };
+      setMessengerPackageFiles((previous) => {
+        if (previous?.pdfUrl?.startsWith("blob:")) URL.revokeObjectURL(previous.pdfUrl);
+        return nextFiles;
+      });
+
+      const summary = buildMessengerSummary(orderId);
+      await copyMessengerSummary(summary);
+
+      setMessengerPackageStatus(
+        `พร้อมส่งอัตโนมัติ • Order ID: ${orderId} • ไม่บันทึก Order ในฐานข้อมูล • กำลังเปิด Messenger`
+      );
+
+      updateMessengerPopup(messengerPopup, "พร้อมเปิด Messenger", `Order ID: ${orderId}\nกำลังเปิด Messenger ของ Adsawin Thailand...`);
+      window.setTimeout(() => {
+        openMessenger(uploadResult.referralRef, messengerPopup);
+      }, 350);
+    } catch (error) {
+      const message = error instanceof Error
+        ? (error.name === "AbortError" ? "การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจอินเทอร์เน็ต/Meta Token แล้วลองใหม่" : error.message)
+        : "สร้างชุดไฟล์ Messenger ไม่สำเร็จ";
+      setMessengerPackageStatus("");
+      setOrderError(message);
+      updateMessengerPopup(
+        messengerPopup,
+        "ยังส่งเข้า Messenger ไม่สำเร็จ",
+        `${message}\n\nหากเพิ่งแก้ .env.local ให้หยุด server แล้วรัน npm run dev ใหม่`,
+        true
+      );
+    } finally {
+      setMessengerPackageBusy(false);
+    }
+  }
+
+  function validateDirectOrderForm() {
+    if (parsedOrderQuantity < 12) return "ขั้นต่ำในการสั่งผลิต 12 ชิ้น";
+    if (parsedOrderQuantity > 1000) return "จำนวนมากกว่า 1,000 ชิ้น กรุณาติดต่อเพื่อขอราคา";
+    if (!pricing.pricingReady) return pricing.message || "ไม่สามารถคำนวณราคาได้";
+    if (!customerInfo.name.trim()) return "กรุณากรอกชื่อผู้ติดต่อ";
+    if (!customerInfo.phone.trim()) return "กรุณากรอกเบอร์โทรผู้ติดต่อ";
+    if (!customerInfo.lineOrEmail.trim()) return "กรุณากรอก Messenger หรือ Email สำหรับติดต่อกลับ";
+    if (!shippingInfo.recipientName.trim()) return "กรุณากรอกชื่อผู้รับ";
+    if (!shippingInfo.phone.trim()) return "กรุณากรอกเบอร์โทรผู้รับ";
+    if (!shippingInfo.address.trim()) return "กรุณากรอกที่อยู่จัดส่ง";
+    if (!shippingInfo.postalCode.trim()) return "กรุณากรอกรหัสไปรษณีย์";
+    if (!orderConfirmed) return "กรุณาติ๊กยืนยันข้อมูลก่อนสั่งผลิต";
+    return "";
+  }
+
+  async function refreshProductionOrderPreview() {
+    const render = productionRenderRef.current;
+    if (!render) {
+      setProductionReady(false);
+      setProductionOrderPreview("");
+      setOrderError("โมเดลไฟล์ผลิตยังไม่พร้อม กรุณารอให้จอไฟล์ผลิตโหลดเสร็จแล้วลองอีกครั้ง");
+      return;
+    }
+
+    setProductionOrderPreviewLoading(true);
+    setOrderError("");
+
+    try {
+      const src = await render({
+        transparent: true,
+        view: "top",
+        download: false,
+        width: 1600,
+        height: 1600,
+        filename: `plug-${selectedPlugId}-production-preview.png`,
+      });
+
+      if (!src) {
+        setProductionOrderPreview("");
+        setOrderError("สร้างตัวอย่างไฟล์ผลิตไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+        return;
+      }
+
+      setProductionReady(true);
+      setProductionOrderPreview(src);
+    } finally {
+      setProductionOrderPreviewLoading(false);
+    }
+  }
+
+  async function confirmProductionOrder() {
+    const validationMessage = validateDirectOrderForm();
+    if (validationMessage) {
+      setOrderError(validationMessage);
+      return;
+    }
+
+    const render = productionRenderRef.current;
+    if (!render) {
+      setProductionReady(false);
+      setOrderError("ยังไม่สามารถสร้างไฟล์ผลิตได้ เพราะโมเดล Production ยังไม่พร้อม");
+      return;
+    }
+
+    setOrderBusy(true);
+    setOrderError("");
+
+    try {
+      const orderId = createOrderId();
+      const productionFileName = `${orderId}-${selectedPlugId}-production.png`;
+      const productionSrc = await render({
+        transparent: true,
+        view: "top",
+        download: false,
+        width: 3000,
+        height: 3000,
+        filename: productionFileName,
+      });
+
+      if (!productionSrc) {
+        setOrderError("สร้างไฟล์ผลิตไม่สำเร็จ ระบบจะไม่ยืนยันแบบจนกว่าจะสร้างไฟล์ได้สำเร็จ");
+        return;
+      }
+
+      const snapshot: ProductionOrderSnapshot = {
+        orderId,
+        createdAt: new Date().toISOString(),
+        designSignature: orderDesignSignature,
+        plugId: selectedPlugId,
+        plugName: plug.name ?? selectedPlugId,
+        quantity: parsedOrderQuantity,
+        note: orderNote.trim(),
+        colors: { ...safeColors },
+        pattern: {
+          url: customization.patternUrl,
+          transform: { ...patternTransform },
+          rotation: patternRotation,
+        },
+        logos: logos.map((logo) => ({
+          ...logo,
+          transform: { ...logo.transform },
+        })),
+        productionFileName,
+        productionSize: { width: 3000, height: 3000 },
+        pricing: { ...pricing },
+        contact: { ...customerInfo },
+        shipping: { ...shippingInfo },
+        paymentMethod,
+        flow: "direct-order",
+      };
+
+      setOrderSnapshot(snapshot);
+      setProductionOrderPreview(productionSrc);
+      downloadDataUrl(productionSrc, productionFileName);
+    } finally {
+      setOrderBusy(false);
+    }
+  }
+
+  function downloadOrderSnapshot() {
+    if (!orderSnapshot) return;
+
+    const blob = new Blob([JSON.stringify(orderSnapshot, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${orderSnapshot.orderId}-order.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 
   function patchCustomization(patch: Partial<CustomizationState>) {
     setCustomization((s) => {
@@ -1518,6 +2499,8 @@ export default function PlugCustomizer({ plugId }: Props) {
         transparent: true,
         view: "top",
         download: false,
+        width: 3000,
+        height: 3000,
         filename: `plug-${selectedPlugId}-production-top.png`,
       });
 
@@ -1694,6 +2677,12 @@ export default function PlugCustomizer({ plugId }: Props) {
     setDragLogoMode(false);
     setDragPatternMode(false);
     setUploadedPatterns([]);
+    productionRenderRef.current = null;
+    setProductionReady(false);
+    setProductionOrderPreview("");
+    setOrderSnapshot(null);
+    setOrderConfirmed(false);
+    setOrderError("");
     // ไม่เด้งไปขั้นตอนอื่นอัตโนมัติ ให้ลูกค้ากดถัดไปเอง
   }
 
@@ -1792,7 +2781,7 @@ export default function PlugCustomizer({ plugId }: Props) {
             onClick={goNext}
             disabled={currentStepIdx === STEPS.length - 1}
           >
-            ถัดไป →
+            {currentStepIdx === STEPS.length - 2 ? "ตรวจแบบ & สั่งผลิต →" : "ถัดไป →"}
           </button>
         </div>
       </div>
@@ -2204,6 +3193,321 @@ export default function PlugCustomizer({ plugId }: Props) {
       );
     }
 
+    if (step === "order") {
+      const topLabel = getColorLabel(
+        safeColors.top ?? customization.topColor,
+        currentColorOptions.top
+      );
+      const bottomLabel = getColorLabel(
+        safeColors.bottom ?? customization.bottomColor,
+        currentColorOptions.bottom
+      );
+      const switchLabel = showQuickSwitch
+        ? getColorLabel(
+            safeColors.switch ?? customization.switchColor,
+            currentColorOptions.switch ?? currentColorOptions.top
+          )
+        : "-";
+
+      return (
+        <div className="orderStep">
+          <div className="orderFlowIntro">
+            <div>
+              <div className="label">ขั้นตอนสุดท้ายหลัง Mockup เสร็จ</div>
+              <div className="hint">Flow นี้ทำตามภาพตัวอย่าง: เลือกจำนวน → คำนวณราคา → เลือกว่าจะสั่งผลิตเลยหรือคุยต่อใน Facebook Messenger</div>
+            </div>
+            <span className={`orderReadyBadge ${productionReady ? "ready" : "waiting"}`}>
+              {productionReady ? "Production พร้อม" : "กำลังรอ Production"}
+            </span>
+          </div>
+
+          <div className="orderPreviewCard">
+            <div className="orderPreviewTitle">Mockup / Production Preview</div>
+            <div className="orderPreviewStage">
+              {productionOrderPreview ? (
+                <img src={productionOrderPreview} alt="Production preview" className="orderPreviewImage" />
+              ) : (
+                <div className="orderPreviewEmpty">
+                  {productionOrderPreviewLoading ? "กำลังสร้างตัวอย่างไฟล์ผลิต..." : "ยังไม่มีตัวอย่างไฟล์ผลิต"}
+                </div>
+              )}
+            </div>
+            <div className="orderPreviewActions">
+              <button
+                type="button"
+                className="btn btnGhost"
+                onClick={() => void refreshProductionOrderPreview()}
+                disabled={productionOrderPreviewLoading}
+              >
+                {productionOrderPreviewLoading ? "กำลังสร้าง..." : "รีเฟรชตัวอย่างไฟล์ผลิต"}
+              </button>
+            </div>
+          </div>
+
+          <div className="orderSummaryGrid">
+            <div className="orderSummaryItem"><span>รุ่น</span><strong>{plug.name ?? selectedPlugId}</strong><small>{selectedPlugId}</small></div>
+            <div className="orderSummaryItem"><span>สีฝาบน</span><strong>{topLabel}</strong><small>{safeColors.top ?? customization.topColor}</small></div>
+            <div className="orderSummaryItem"><span>สีฝาล่าง</span><strong>{bottomLabel}</strong><small>{safeColors.bottom ?? customization.bottomColor}</small></div>
+            {showQuickSwitch && (
+              <div className="orderSummaryItem"><span>สีสวิตช์</span><strong>{switchLabel}</strong><small>{safeColors.switch ?? customization.switchColor}</small></div>
+            )}
+            <div className="orderSummaryItem"><span>ลวดลาย</span><strong>{hasPattern ? "มีลาย" : "ไม่มีลาย"}</strong><small>{hasPattern ? `Zoom ${patternTransform.zoom.toFixed(2)} • ${rotationDeg}°` : "สีพื้น"}</small></div>
+            <div className="orderSummaryItem"><span>โลโก้</span><strong>{logoCount} จุด</strong><small>{logoCount ? "ใช้ตำแหน่งจาก Mockup" : "ไม่มีโลโก้"}</small></div>
+          </div>
+
+          <div className="orderFlowCard">
+            <div className="orderFlowStepTitle">1) เลือกจำนวน</div>
+            <div className="orderQuantityRow">
+              <label className="orderField orderFieldCompact">
+                <span className="label">จำนวนผลิต</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={orderQuantity}
+                  onChange={(e) => setOrderQuantity(e.target.value)}
+                  className="orderInput"
+                  inputMode="numeric"
+                />
+              </label>
+              <div className="orderMiniHint">จำนวนนี้จะถูกใช้ทั้งในระบบคำนวณราคา, Messenger และคำสั่งผลิต</div>
+            </div>
+          </div>
+
+          <div className="orderFlowCard">
+            <div className="orderFlowStepTitle">2) ระบบคำนวณราคา</div>
+            <div className="priceGrid">
+              <div className="priceItem"><span>จำนวน</span><strong>{parsedOrderQuantity || 0} ชิ้น</strong></div>
+              <div className="priceItem"><span>ช่วงราคา</span><strong>{pricing.pricingReady ? `${pricing.minQty}-${pricing.maxQty} ชิ้น` : "-"}</strong></div>
+              <div className="priceItem"><span>ราคาต่อชิ้น</span><strong>{pricing.pricingReady ? formatPrice(pricing.unitPrice) : "-"}</strong></div>
+              <div className="priceItem priceItemTotal"><span>ราคารวม</span><strong>{pricing.pricingReady ? formatPrice(pricing.totalPrice) : pricing.message}</strong></div>
+            </div>
+            <div className="hint" style={{ marginTop: 8 }}>
+              ระบบเลือกราคาต่อชิ้นอัตโนมัติตามรุ่นและจำนวนสั่งผลิต • ขั้นต่ำ 12 ชิ้น • มากกว่า 1,000 ชิ้นให้ติดต่อขอราคา
+            </div>
+          </div>
+
+          <div className="orderFlowCard">
+            <div className="orderFlowStepTitle">3) ต้องการทำต่อ?</div>
+            <div className="branchGrid">
+              <button
+                type="button"
+                className={`branchCard ${continuationChoice === "order" ? "active" : ""}`}
+                onClick={() => setContinuationChoice("order")}
+              >
+                <strong>สั่งผลิตเลย</strong>
+                <span>กรอกข้อมูล → ชำระเงิน → ยืนยันสั่งผลิต</span>
+              </button>
+              <button
+                type="button"
+                className={`branchCard ${continuationChoice === "messenger" ? "active" : ""}`}
+                onClick={() => setContinuationChoice("messenger")}
+              >
+                <strong>คุย Messenger</strong>
+                <span>เปิด Facebook Messenger พร้อมข้อมูล Mockup / รุ่นสินค้า / จำนวน / ราคา</span>
+              </button>
+            </div>
+          </div>
+
+          {continuationChoice === "messenger" && (
+            <div className="orderFlowCard messengerFlowCard">
+              <div className="orderFlowStepTitle">คุย Facebook Messenger</div>
+              <div className="messengerSummaryBox">
+                <div className="messengerSummaryTitle">ข้อมูลสำหรับส่งใน Messenger</div>
+                <pre className="messengerSummaryText">{messengerSummaryText}</pre>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className="btn btnGhost" onClick={() => void copyMessengerSummary()}>
+                  {messengerCopied ? "คัดลอกแล้ว ✓" : "คัดลอกข้อความ"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={messengerPackageBusy || !pricing.pricingReady || !productionReady}
+                  onClick={() => void createMessengerPackageAndOpen()}
+                >
+                  {messengerPackageBusy ? "กำลังสร้างและส่งข้อมูล..." : "ส่งรายละเอียดไป Messenger"}
+                </button>
+              </div>
+
+              {messengerPackageStatus && (
+                <div className="messengerPackageStatus">{messengerPackageStatus}</div>
+              )}
+
+              {messengerPackageFiles && (
+                <div className="messengerFileGrid">
+                  <button type="button" className="btn btnGhost" onClick={() => downloadDataUrl(messengerPackageFiles.productionUrl, messengerPackageFiles.productionFileName)}>
+                    ดาวน์โหลดไฟล์ผลิต
+                  </button>
+                  <button type="button" className="btn btnGhost" onClick={() => downloadDataUrl(messengerPackageFiles.topRightUrl, messengerPackageFiles.topRightFileName)}>
+                    ดาวน์โหลดมุมบนเอียงขวา
+                  </button>
+                  <a className="btn btnGhost" href={messengerPackageFiles.pdfUrl} download={messengerPackageFiles.pdfFileName}>
+                    ดาวน์โหลด PDF
+                  </a>
+                </div>
+              )}
+
+              <div className="hint" style={{ marginTop: 8 }}>
+                Facebook Page: <strong>Adsawin Thailand</strong> • ระบบไม่ใช้ฐานข้อมูลและไม่เก็บไฟล์บนเว็บ เมื่อกดส่ง ระบบจะอัปโหลด PDF + ไฟล์ผลิต + ภาพมุมบนเอียงขวาเข้า Meta โดยตรง แล้วเปิด Messenger ด้วย ref แบบเซ็นลายเซ็น Webhook จะส่งข้อความ + รูป 2 รูป + PDF เข้าห้องแชต จากนั้นจบขั้นตอนและคุยงานต่อใน Messenger ได้เลย
+              </div>
+              <button type="button" className="btn btnGhost" style={{ marginTop: 8 }} onClick={openFacebookSessionFallback}>
+                เปิด Facebook Messages ด้วยบัญชีที่ล็อกอินอยู่ (สำรอง)
+              </button>
+              <div className="hint" style={{ marginTop: 6 }}>
+                ปุ่มสำรองด้านบนช่วยกรณี m.me ขอ Login ใหม่บนคอม แต่เป็นเพียงการเปิดแชต จึงจะไม่ส่งชุดไฟล์อัตโนมัติ
+              </div>
+            </div>
+          )}
+
+          {continuationChoice === "order" && (
+            <div className="directOrderFlow">
+              <div className="orderFlowCard">
+                <div className="orderFlowStepTitle">4) กรอกข้อมูล</div>
+                <label className="orderField orderFieldWide">
+                  <span className="label">หมายเหตุถึงฝ่ายผลิต</span>
+                  <textarea
+                    value={orderNote}
+                    onChange={(e) => setOrderNote(e.target.value)}
+                    className="orderTextarea"
+                    placeholder="เช่น ตรวจตำแหน่งโลโก้ก่อนขึ้นงานจริง / สีตามตัวอย่างที่ยืนยัน"
+                    rows={3}
+                  />
+                </label>
+              </div>
+
+              <div className="orderFlowCard">
+                <div className="orderFlowStepTitle">5) ข้อมูลผู้สั่ง</div>
+                <div className="formGridTwo">
+                  <label className="orderField">
+                    <span className="label">ชื่อผู้ติดต่อ</span>
+                    <input className="orderInput" value={customerInfo.name} onChange={(e) => updateCustomerInfo("name", e.target.value)} />
+                  </label>
+                  <label className="orderField">
+                    <span className="label">เบอร์โทร</span>
+                    <input className="orderInput" value={customerInfo.phone} onChange={(e) => updateCustomerInfo("phone", e.target.value)} />
+                  </label>
+                  <label className="orderField">
+                    <span className="label">บริษัท</span>
+                    <input className="orderInput" value={customerInfo.company} onChange={(e) => updateCustomerInfo("company", e.target.value)} />
+                  </label>
+                  <label className="orderField">
+                    <span className="label">Messenger / Email</span>
+                    <input className="orderInput" value={customerInfo.lineOrEmail} onChange={(e) => updateCustomerInfo("lineOrEmail", e.target.value)} />
+                  </label>
+                </div>
+              </div>
+
+              <div className="orderFlowCard">
+                <div className="orderFlowStepTitle">6) ข้อมูลจัดส่ง</div>
+                <div className="formGridTwo">
+                  <label className="orderField">
+                    <span className="label">ชื่อผู้รับ</span>
+                    <input className="orderInput" value={shippingInfo.recipientName} onChange={(e) => updateShippingInfo("recipientName", e.target.value)} />
+                  </label>
+                  <label className="orderField">
+                    <span className="label">เบอร์โทร</span>
+                    <input className="orderInput" value={shippingInfo.phone} onChange={(e) => updateShippingInfo("phone", e.target.value)} />
+                  </label>
+                  <label className="orderField orderFieldWide">
+                    <span className="label">ที่อยู่</span>
+                    <textarea className="orderTextarea" value={shippingInfo.address} onChange={(e) => updateShippingInfo("address", e.target.value)} rows={3} />
+                  </label>
+                  <label className="orderField">
+                    <span className="label">รหัสไปรษณีย์</span>
+                    <input className="orderInput" value={shippingInfo.postalCode} onChange={(e) => updateShippingInfo("postalCode", e.target.value)} />
+                  </label>
+                </div>
+              </div>
+
+              <div className="orderFlowCard">
+                <div className="orderFlowStepTitle">7) ชำระเงิน</div>
+                <div className="paymentList">
+                  <label className={`paymentCard ${paymentMethod === "contact-first" ? "active" : ""}`}>
+                    <input type="radio" name="paymentMethod" checked={paymentMethod === "contact-first"} onChange={() => setPaymentMethod("contact-first")} />
+                    <div><strong>ให้ทีมงานติดต่อกลับก่อน</strong><span>เหมาะกับการยืนยันราคา/ยอดโอนกับแอดมินก่อน</span></div>
+                  </label>
+                  <label className={`paymentCard ${paymentMethod === "bank-transfer" ? "active" : ""}`}>
+                    <input type="radio" name="paymentMethod" checked={paymentMethod === "bank-transfer"} onChange={() => setPaymentMethod("bank-transfer")} />
+                    <div><strong>โอนเงิน</strong><span>แนบข้อมูลชำระเงินหรือส่งสลิปภายหลังผ่านแอดมิน</span></div>
+                  </label>
+                  <label className={`paymentCard ${paymentMethod === "invoice" ? "active" : ""}`}>
+                    <input type="radio" name="paymentMethod" checked={paymentMethod === "invoice"} onChange={() => setPaymentMethod("invoice")} />
+                    <div><strong>ออกใบเสนอราคา / Invoice</strong><span>สำหรับลูกค้าองค์กรหรือบริษัท</span></div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="orderFlowCard">
+                <div className="orderFlowStepTitle">8) ยืนยันสั่งผลิต</div>
+                <label className="orderConfirmBox">
+                  <input
+                    type="checkbox"
+                    checked={orderConfirmed}
+                    onChange={(e) => setOrderConfirmed(e.target.checked)}
+                  />
+                  <span>ฉันตรวจสอบ Mockup, รุ่นสินค้า, จำนวน, ราคา, ข้อมูลผู้สั่ง, ที่อยู่จัดส่ง และพร้อมยืนยันสั่งผลิตเรียบร้อยแล้ว</span>
+                </label>
+
+                {parsedOrderQuantity < 12 && (
+                  <div className="orderError">ขั้นต่ำในการสั่งผลิต 12 ชิ้น</div>
+                )}
+                {parsedOrderQuantity > 1000 && (
+                  <div className="orderError">จำนวนมากกว่า 1,000 ชิ้น กรุณาติดต่อเพื่อขอราคา</div>
+                )}
+                {orderError && <div className="orderError">{orderError}</div>}
+
+                {!orderSnapshot ? (
+                  <button
+                    type="button"
+                    className="btn btnPrimary orderSubmitBtn"
+                    disabled={orderBusy || !productionReady || !pricing.pricingReady}
+                    onClick={() => void confirmProductionOrder()}
+                  >
+                    {orderBusy ? "กำลังสร้างไฟล์ผลิต..." : "🏭 ยืนยันสั่งผลิต"}
+                  </button>
+                ) : (
+                  <div className="orderSuccess">
+                    <div className="orderSuccessTop">
+                      <div>
+                        <div className="orderSuccessTitle">✓ ORDER สำเร็จ</div>
+                        <div className="orderSuccessId">Order ID: {orderSnapshot.orderId}</div>
+                      </div>
+                      <span className="orderReadyBadge ready">ยืนยันแล้ว</span>
+                    </div>
+                    <div className="orderSuccessMeta">
+                      ไฟล์ผลิต: {orderSnapshot.productionFileName} • {orderSnapshot.productionSize.width}×{orderSnapshot.productionSize.height}px
+                    </div>
+                    <div className="orderSuccessMeta">
+                      ยอดสั่งผลิต: {formatPrice(orderSnapshot.pricing.totalPrice)} • วิธีชำระเงิน: {paymentMethod === "bank-transfer" ? "โอนเงิน" : paymentMethod === "invoice" ? "Invoice" : "ให้ทีมงานติดต่อกลับก่อน"}
+                    </div>
+                    <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="btn btnPrimary"
+                        onClick={() => downloadDataUrl(productionOrderPreview, orderSnapshot.productionFileName)}
+                        disabled={!productionOrderPreview}
+                      >
+                        ดาวน์โหลดไฟล์ผลิตอีกครั้ง
+                      </button>
+                      <button type="button" className="btn btnGhost" onClick={downloadOrderSnapshot}>
+                        ดาวน์โหลดข้อมูลใบงาน JSON
+                      </button>
+                    </div>
+                    <div className="trackProductionBox">
+                      <div className="trackProductionTitle">9) ติดตามการผลิต</div>
+                      <div className="trackProductionText">ใช้ Order ID นี้เพื่อติดตามสถานะการผลิตกับทีมงาน: <strong>{orderSnapshot.orderId}</strong></div>
+                    </div>
+                    <div className="orderSuccessHint">หากกลับไปแก้สี ลาย โลโก้ จำนวน ราคา หรือข้อมูลติดต่อ ระบบจะยกเลิก Snapshot นี้และต้องยืนยันใหม่</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     return (
       <div>
         {!isMobileLayout && (
@@ -2400,6 +3704,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                       renderMode
                       onRenderReady={(render) => {
                         productionRenderRef.current = render;
+                        setProductionReady(true);
                       }}
                     />
                   </div>
@@ -2470,7 +3775,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
                 <div className="row">
                   <span className="badgeSoft">รุ่น: {plug.name ?? selectedPlugId}</span>
-                  <span className="badgeSoft">Step: {currentStepIdx + 1}/5</span>
+                  <span className="badgeSoft">Step: {currentStepIdx + 1}/{STEPS.length}</span>
                 </div>
                 <div className="row" style={{ gap: 8 }}>
                   <StatusBadge active={hasPattern} activeText="มีลาย" inactiveText="ไม่มีลาย" />
@@ -3386,6 +4691,413 @@ const CSS = `
   position:relative;
 }
 
+.orderStep{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.orderFlowIntro,
+.orderStepHead{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.orderReadyBadge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:28px;
+  padding:5px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:800;
+  white-space:nowrap;
+}
+.orderReadyBadge.ready{
+  color:#166534;
+  background:#dcfce7;
+  border:1px solid #bbf7d0;
+}
+.orderReadyBadge.waiting{
+  color:#92400e;
+  background:#fef3c7;
+  border:1px solid #fde68a;
+}
+.orderPreviewCard,
+.orderFlowCard{
+  border:1px solid #dbe3ee;
+  border-radius:16px;
+  overflow:hidden;
+  background:#fff;
+}
+.orderFlowCard{
+  padding:14px;
+}
+.orderFlowStepTitle{
+  font-size:14px;
+  font-weight:900;
+  color:#0f172a;
+  margin-bottom:10px;
+}
+.orderPreviewTitle{
+  padding:10px 12px;
+  font-size:13px;
+  font-weight:800;
+  color:#334155;
+  background:#f8fafc;
+  border-bottom:1px solid #e5e7eb;
+}
+.orderPreviewStage{
+  min-height:220px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:12px;
+  background:linear-gradient(135deg,#f8fafc,#eef2f7);
+}
+.orderPreviewImage{
+  display:block;
+  width:100%;
+  max-height:320px;
+  object-fit:contain;
+}
+.orderPreviewEmpty{
+  min-height:190px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  color:#64748b;
+  font-size:13px;
+}
+.orderPreviewActions{
+  display:flex;
+  justify-content:flex-end;
+  padding:10px 12px;
+  border-top:1px solid #e5e7eb;
+}
+.orderSummaryGrid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.orderSummaryItem{
+  padding:11px 12px;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  background:#fff;
+}
+.orderSummaryItem span,
+.orderSummaryItem strong,
+.orderSummaryItem small{
+  display:block;
+}
+.orderSummaryItem span{
+  color:#64748b;
+  font-size:11px;
+  font-weight:700;
+}
+.orderSummaryItem strong{
+  margin-top:3px;
+  color:#0f172a;
+  font-size:14px;
+}
+.orderSummaryItem small{
+  margin-top:2px;
+  color:#94a3b8;
+  font-size:11px;
+}
+.orderQuantityRow{
+  display:grid;
+  grid-template-columns:minmax(180px, 260px) minmax(0,1fr);
+  gap:12px;
+  align-items:end;
+}
+.orderMiniHint{
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  color:#64748b;
+  font-size:12px;
+  line-height:1.45;
+}
+.priceGrid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+}
+.priceItem{
+  padding:12px;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  background:#f8fafc;
+}
+.priceItem span,
+.priceItem strong{
+  display:block;
+}
+.priceItem span{
+  color:#64748b;
+  font-size:11px;
+  font-weight:700;
+}
+.priceItem strong{
+  margin-top:4px;
+  color:#0f172a;
+  font-size:14px;
+}
+.priceItemTotal{
+  background:#ecfeff;
+  border-color:#a5f3fc;
+}
+.branchGrid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.branchCard{
+  text-align:left;
+  border:1px solid #dbe3ee;
+  border-radius:14px;
+  background:#fff;
+  padding:14px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  cursor:pointer;
+  transition:all .18s ease;
+}
+.branchCard strong{
+  font-size:14px;
+  color:#0f172a;
+}
+.branchCard span{
+  font-size:12px;
+  color:#64748b;
+  line-height:1.5;
+}
+.branchCard.active{
+  border-color:#3b82f6;
+  background:rgba(59,130,246,.06);
+  box-shadow:0 0 0 3px rgba(59,130,246,.08);
+}
+.messengerFlowCard{
+  background:#f8fafc;
+}
+.messengerSummaryBox{
+  border:1px dashed #cbd5e1;
+  border-radius:12px;
+  background:#fff;
+  padding:12px;
+  margin-bottom:10px;
+}
+.messengerSummaryTitle{
+  font-size:12px;
+  font-weight:800;
+  color:#334155;
+  margin-bottom:8px;
+}
+.messengerSummaryText{
+  margin:0;
+  white-space:pre-wrap;
+  word-break:break-word;
+  color:#0f172a;
+  font-size:13px;
+  line-height:1.6;
+  font-family:inherit;
+}
+.messengerPackageStatus{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid #bfdbfe;
+  background:#eff6ff;
+  color:#1e40af;
+  font-size:12px;
+  font-weight:800;
+  line-height:1.45;
+}
+.messengerFileGrid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin-top:10px;
+}
+.messengerFileGrid .btn{
+  text-decoration:none;
+  justify-content:center;
+  text-align:center;
+}
+
+.directOrderFlow{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.formGridTwo{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.orderField{
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+}
+.orderFieldCompact{
+  max-width:220px;
+}
+.orderFieldWide{
+  grid-column:1 / -1;
+}
+.orderInput,
+.orderTextarea{
+  width:100%;
+  box-sizing:border-box;
+  border:1px solid #cbd5e1;
+  border-radius:12px;
+  background:#fff;
+  color:#0f172a;
+  font:inherit;
+  outline:none;
+}
+.orderInput{
+  height:42px;
+  padding:0 12px;
+}
+.orderTextarea{
+  min-height:82px;
+  padding:10px 12px;
+  resize:vertical;
+}
+.orderInput:focus,
+.orderTextarea:focus{
+  border-color:#94a3b8;
+  box-shadow:0 0 0 3px rgba(148,163,184,.16);
+}
+.paymentList{
+  display:grid;
+  gap:10px;
+}
+.paymentCard{
+  display:grid;
+  grid-template-columns:18px minmax(0,1fr);
+  gap:10px;
+  align-items:flex-start;
+  padding:12px;
+  border:1px solid #dbe3ee;
+  border-radius:12px;
+  background:#fff;
+  cursor:pointer;
+}
+.paymentCard.active{
+  border-color:#3b82f6;
+  background:rgba(59,130,246,.05);
+}
+.paymentCard strong,
+.paymentCard span{
+  display:block;
+}
+.paymentCard strong{
+  color:#0f172a;
+  font-size:13px;
+}
+.paymentCard span{
+  margin-top:3px;
+  color:#64748b;
+  font-size:12px;
+  line-height:1.45;
+}
+.orderConfirmBox{
+  display:flex;
+  align-items:flex-start;
+  gap:9px;
+  padding:12px;
+  border:1px solid #cbd5e1;
+  border-radius:12px;
+  background:#f8fafc;
+  color:#334155;
+  font-size:13px;
+  line-height:1.45;
+}
+.orderConfirmBox input{
+  margin-top:2px;
+  width:17px;
+  height:17px;
+  flex:0 0 auto;
+}
+.orderError{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid #fecaca;
+  background:#fef2f2;
+  color:#b91c1c;
+  font-size:12px;
+  font-weight:700;
+}
+.orderSubmitBtn{
+  width:100%;
+  min-height:44px;
+  margin-top:12px;
+}
+.orderSuccess{
+  padding:14px;
+  border:1px solid #bbf7d0;
+  border-radius:14px;
+  background:#f0fdf4;
+  margin-top:12px;
+}
+.orderSuccessTop{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+.orderSuccessTitle{
+  color:#166534;
+  font-weight:900;
+  font-size:14px;
+}
+.orderSuccessId{
+  margin-top:3px;
+  color:#14532d;
+  font-size:12px;
+  font-weight:700;
+  word-break:break-all;
+}
+.orderSuccessMeta{
+  margin-top:9px;
+  color:#3f6212;
+  font-size:12px;
+  word-break:break-word;
+}
+.trackProductionBox{
+  margin-top:12px;
+  padding:12px;
+  border-radius:12px;
+  border:1px dashed #86efac;
+  background:#ffffff;
+}
+.trackProductionTitle{
+  color:#166534;
+  font-size:13px;
+  font-weight:900;
+}
+.trackProductionText{
+  margin-top:6px;
+  color:#14532d;
+  font-size:12px;
+  line-height:1.5;
+}
+.orderSuccessHint{
+  margin-top:10px;
+  color:#4d7c0f;
+  font-size:11px;
+  line-height:1.45;
+}
+
 .productionPreviewInset{
   position:absolute;
   top:12px;
@@ -3786,6 +5498,25 @@ input[type="range"]{
 }
 
 @media (max-width: 768px){
+
+  .orderFlowIntro,
+  .orderStepHead,
+  .orderSuccessTop{
+    flex-direction:column;
+  }
+  .orderSummaryGrid,
+  .priceGrid,
+  .branchGrid,
+  .formGridTwo,
+  .messengerFileGrid{
+    grid-template-columns:1fr;
+  }
+  .orderQuantityRow{
+    grid-template-columns:1fr;
+  }
+  .orderPreviewStage{
+    min-height:180px;
+  }
   .pc-wrap{
     height:auto;
     min-height:100vh;

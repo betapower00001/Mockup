@@ -21,6 +21,8 @@ export type PlugRenderOptions = {
   view?: RenderViewName;
   download?: boolean;
   productionArtwork?: boolean;
+  width?: number;
+  height?: number;
 };
 
 export type PlugRenderFn = (opts?: PlugRenderOptions) => Promise<string | null>;
@@ -1998,8 +2000,8 @@ function PlugScene({
       const shouldDownload = opts?.download ?? true;
       const productionArtwork = opts?.productionArtwork ?? false;
 
-      const exportWidth = shouldDownload ? 2200 : 1800;
-      const exportHeight = shouldDownload ? 2200 : 1800;
+      const exportWidth = Math.max(256, Math.round(opts?.width ?? (shouldDownload ? 2200 : 1800)));
+      const exportHeight = Math.max(256, Math.round(opts?.height ?? (shouldDownload ? 2200 : 1800)));
 
       const exportCamera = liveCamera.clone() as THREE.PerspectiveCamera;
       exportCamera.aspect = exportWidth / exportHeight;
