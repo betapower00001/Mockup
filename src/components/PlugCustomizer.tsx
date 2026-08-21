@@ -2003,108 +2003,56 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    const isMobile = isMobileMessengerDevice();
+    // SHARE TEXT ONLY:
+    // ใช้ Web Share API เหมือนปุ่มแชร์ทั่วไปของมือถือ/ระบบปฏิบัติการ
+    // รอบนี้ส่งเฉพาะข้อความ Order — ไม่สร้าง PNG, PDF และไม่เรียก Meta Send API
+    const shareText = buildMessengerSummary();
 
-    // PC / Desktop:
-    // m.me referral บน desktop มีโอกาสถูกพาไปหน้า Messenger เก่าหรือหน้า unavailable
-    // จึงเปิด Facebook Messages โดยตรงด้วย Page ID ที่ทดสอบแล้ว และคัดลอก Order ให้พร้อมวาง
-    // Browser ไม่อนุญาตให้เว็บภายนอก paste / send เข้า facebook.com อัตโนมัติ
-    if (!isMobile) {
-      setMessengerPackageBusy(true);
-      setOrderError("");
-      setMessengerPackageStatus("PC: กำลังคัดลอกข้อมูล Order และเปิด Facebook Messages...");
+    setMessengerPackageBusy(true);
+    setOrderError("");
+    setMessengerPackageStatus("กำลังเปิดเมนูแชร์ของเครื่อง...");
 
-      // เปิดทันทีจาก user gesture ป้องกัน popup blocker
+    try {
+      if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+        await navigator.share({
+          title: "รายละเอียดสั่งผลิต Adsawin",
+          text: shareText,
+        });
+        setMessengerPackageStatus("แชร์รายละเอียดแล้ว ✓");
+        return;
+      }
+
+      // Fallback สำหรับ PC/Browser ที่ไม่มี Web Share API:
+      // คัดลอกข้อความ แล้วเปิด Facebook Messages ที่ล็อกอินอยู่
+      await copyMessengerSummary(shareText);
       const chatWindow = window.open(
         MESSENGER_DESKTOP_FALLBACK_URL,
         "_blank",
         "noopener,noreferrer"
       );
 
-      try {
-        await copyMessengerSummary(buildMessengerSummary());
-        setMessengerPackageStatus(
-          chatWindow
-            ? "PC: เปิดแชต Adsawin Thailand แล้ว ✓ • ข้อมูล Order ถูกคัดลอกแล้ว กด Ctrl+V แล้วส่ง"
-            : "PC: ข้อมูล Order ถูกคัดลอกแล้ว ✓ • Browser บล็อกหน้าต่างใหม่ กรุณากดปุ่มเปิด Facebook Messages ด้านล่าง"
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "คัดลอกข้อความไม่สำเร็จ";
-        setMessengerPackageStatus("PC: เปิดแชต Adsawin Thailand แล้ว");
-        setOrderError(`${message} กรุณาคัดลอกข้อความจากกล่องสรุปแล้ววางใน Facebook Messages`);
-      } finally {
-        setMessengerPackageBusy(false);
-      }
-      return;
-    }
-
-    // Mobile:
-    // ใช้ signed m.me referral เพื่อให้ Meta ส่ง PSID + ref เข้า Webhook
-    // แล้ว Webhook ส่งข้อความ Order เข้าแชตอัตโนมัติ โดยยังไม่มี PNG / PDF
-    const orderId = createOrderId();
-    const messengerPopup = window.open("about:blank", "_blank");
-
-    setMessengerPackageBusy(true);
-    setOrderError("");
-    setMessengerPackageStatus("มือถือ: กำลังเตรียมลิงก์ Messenger พร้อมข้อมูลคำสั่งซื้อ...");
-    updateMessengerPopup(
-      messengerPopup,
-      "กำลังเตรียม Messenger...",
-      "กำลังสร้างลิงก์แบบปลอดภัยสำหรับส่งรายละเอียดสินค้าเข้าแชตอัตโนมัติ"
-    );
-
-    try {
-      const configStatus = await readMessengerConfigStatus();
-      if (!configStatus.configured) {
-        const missingText = configStatus.missing.join(", ");
-        throw new Error(`ยังเชื่อม Meta Messenger ไม่ครบ\nขาด: ${missingText}`);
-      }
-
-      const response = await fetchWithTimeout(
-        "/api/messenger/referral",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orderId,
-            modelId: selectedPlugId,
-            quantity: parsedOrderQuantity,
-            unitPrice: pricing.unitPrice,
-          }),
-        },
-        15_000
-      );
-
-      const result = (await response.json()) as MessengerUploadResponse;
-      if (!response.ok || !result.ok || !result.referralRef) {
-        const missing = result.missing?.length ? `\nขาด: ${result.missing.join(", ")}` : "";
-        throw new Error(`${result.error || "สร้างลิงก์ Messenger ไม่สำเร็จ"}${missing}`);
-      }
-
       setMessengerPackageStatus(
-        `มือถือ: พร้อมส่งข้อความอัตโนมัติ • Order ID: ${orderId} • กำลังเปิด Messenger...`
+        chatWindow
+          ? "Browser นี้ไม่มีเมนู Share • คัดลอกข้อมูลแล้ว ✓ • เปิด Facebook Messages แล้ว กด Ctrl+V แล้วส่ง"
+          : "Browser นี้ไม่มีเมนู Share • คัดลอกข้อมูลแล้ว ✓ • กรุณาเปิด Facebook Messages แล้ววางข้อความ"
       );
-      updateMessengerPopup(
-        messengerPopup,
-        "กำลังเปิด Messenger",
-        `Order ID: ${orderId}\nเมื่อ Meta ส่ง referral เข้า Webhook ระบบจะส่งรายละเอียดสินค้าเข้าแชตอัตโนมัติ`
-      );
-
-      window.setTimeout(() => {
-        openMessenger(result.referralRef, messengerPopup);
-      }, 150);
     } catch (error) {
-      const message = error instanceof Error
-        ? (error.name === "AbortError" ? "การเชื่อมต่อใช้เวลานานเกินไป กรุณาลองใหม่อีกครั้ง" : error.message)
-        : "เปิด Messenger ไม่สำเร็จ";
-      setMessengerPackageStatus("");
-      setOrderError(message);
-      updateMessengerPopup(
-        messengerPopup,
-        "ยังเปิด Messenger ไม่สำเร็จ",
-        message,
-        true
-      );
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setMessengerPackageStatus("ยกเลิกการแชร์");
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : "เปิดเมนูแชร์ไม่สำเร็จ";
+
+      // ถ้า Share API มีแต่ทำงานไม่ได้ ให้พยายามคัดลอกข้อความไว้เป็น fallback
+      try {
+        await copyMessengerSummary(shareText);
+        setMessengerPackageStatus("แชร์โดยตรงไม่สำเร็จ แต่คัดลอกข้อความไว้แล้ว ✓");
+        setOrderError(`${message} กรุณาเลือกคัดลอก/เปิด Facebook Messages แล้ววางข้อความ`);
+      } catch {
+        setMessengerPackageStatus("");
+        setOrderError(message);
+      }
     } finally {
       setMessengerPackageBusy(false);
     }
@@ -3333,7 +3281,7 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="orderFlowIntro">
             <div>
               <div className="label">ขั้นตอนสุดท้ายหลัง Mockup เสร็จ</div>
-              <div className="hint">Flow นี้ทำตามภาพตัวอย่าง: เลือกจำนวน → คำนวณราคา → เลือกว่าจะสั่งผลิตเลยหรือคุยต่อใน Facebook Messenger</div>
+              <div className="hint">เลือกจำนวน → คำนวณราคา → เลือกว่าจะสั่งผลิตเลยหรือแชร์รายละเอียดไปยัง Messenger / LINE / แอปที่ต้องการ</div>
             </div>
             <span className={`orderReadyBadge ${productionReady ? "ready" : "waiting"}`}>
               {productionReady ? "Production พร้อม" : "กำลังรอ Production"}
@@ -3422,17 +3370,17 @@ export default function PlugCustomizer({ plugId }: Props) {
                 className={`branchCard ${continuationChoice === "messenger" ? "active" : ""}`}
                 onClick={() => setContinuationChoice("messenger")}
               >
-                <strong>คุย Messenger</strong>
-                <span>เปิด Facebook Messenger พร้อมข้อมูล Mockup / รุ่นสินค้า / จำนวน / ราคา</span>
+                <strong>แชร์รายละเอียด</strong>
+                <span>เปิดเมนู Share ของเครื่อง แล้วเลือก Messenger / LINE / แอปที่ต้องการ</span>
               </button>
             </div>
           </div>
 
           {continuationChoice === "messenger" && (
             <div className="orderFlowCard messengerFlowCard">
-              <div className="orderFlowStepTitle">คุย Facebook Messenger</div>
+              <div className="orderFlowStepTitle">แชร์รายละเอียดการสั่งผลิต</div>
               <div className="messengerSummaryBox">
-                <div className="messengerSummaryTitle">ข้อมูลสำหรับส่งใน Messenger</div>
+                <div className="messengerSummaryTitle">ข้อมูลที่จะแชร์</div>
                 <pre className="messengerSummaryText">{messengerSummaryText}</pre>
               </div>
               <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -3448,13 +3396,12 @@ export default function PlugCustomizer({ plugId }: Props) {
                   }
                   onClick={() => void createMessengerPackageAndOpen()}
                 >
-                  {messengerPackageBusy ? "กำลังส่งข้อมูล..." : "ส่งรายละเอียดไป Messenger"}
+                  {messengerPackageBusy ? "กำลังเปิดเมนูแชร์..." : "แชร์รายละเอียด"}
                 </button>
               </div>
 
               <div className="hint" style={{ marginTop: 8 }}>
-                <strong>มือถือ:</strong> กดครั้งเดียว ใช้ m.me referral และส่งข้อมูล Order เข้าแชตอัตโนมัติผ่าน Webhook<br />
-                <strong>PC:</strong> เปิด Facebook Messages ที่ล็อกอินอยู่และคัดลอกข้อมูล Order ให้อัตโนมัติ จากนั้นกด Ctrl+V แล้วส่ง
+                กด <strong>“แชร์รายละเอียด”</strong> แล้วเลือก Messenger, LINE หรือแอปที่ต้องการจากเมนู Share ของเครื่อง • รอบนี้แชร์เฉพาะข้อความ Order
               </div>
 
               {messengerPackageStatus && (
@@ -3462,13 +3409,13 @@ export default function PlugCustomizer({ plugId }: Props) {
               )}
 
               <div className="hint" style={{ marginTop: 8 }}>
-                <strong>รอบนี้ส่งเฉพาะข้อความก่อน</strong> ยังไม่สร้างรูปและ PDF • PC ใช้ Facebook Messages โดยตรงเพื่อเลี่ยงหน้า m.me ที่ใช้งานไม่ได้
+                <strong>ยังไม่ส่งรูปหรือ PDF</strong> • หาก Browser บน PC ไม่รองรับ Web Share ระบบจะคัดลอกข้อความและเปิด Facebook Messages ให้เป็นทางสำรอง
               </div>
               <button type="button" className="btn btnGhost" style={{ marginTop: 8 }} onClick={openFacebookSessionFallback}>
-                เปิด Facebook Messages ด้วยบัญชีที่ล็อกอินอยู่ (สำรอง)
+                เปิด Facebook Messages (สำรอง)
               </button>
               <div className="hint" style={{ marginTop: 6 }}>
-                ปุ่มนี้เปิด Facebook Messages โดยตรงด้วยบัญชีที่ล็อกอินอยู่ และจะไม่ส่งรูปหรือ PDF อัตโนมัติ
+                ใช้ปุ่มนี้เมื่อเมนู Share ไม่มี Messenger หรือ Browser ไม่รองรับการแชร์โดยตรง
               </div>
             </div>
           )}
