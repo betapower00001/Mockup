@@ -156,8 +156,9 @@ const DEFAULT_SHIPPING_INFO: ShippingInfo = {
 };
 
 const FACEBOOK_PAGE_USERNAME = "adsawinthailand";
+const FACEBOOK_PAGE_ID = "110219891504385";
 const MESSENGER_REFERRAL_URL = `https://m.me/${FACEBOOK_PAGE_USERNAME}`;
-const MESSENGER_DESKTOP_FALLBACK_URL = `https://www.facebook.com/messages/t/${FACEBOOK_PAGE_USERNAME}`;
+const MESSENGER_DESKTOP_FALLBACK_URL = `https://www.facebook.com/messages/t/${FACEBOOK_PAGE_ID}`;
 
 const PRICE_TIERS: Record<string, PriceTier[]> = {
   "TYPE-1": [
@@ -1237,6 +1238,13 @@ type MessengerUploadResponse = {
   missing?: string[];
 };
 
+type MessengerAttachmentUploadResponse = {
+  ok: boolean;
+  attachmentId?: string;
+  error?: string;
+  code?: string;
+};
+
 type MessengerConfigStatus = {
   ok: boolean;
   configured: boolean;
@@ -1288,7 +1296,7 @@ function drawImageContain(
   ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
 }
 
-function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.92) {
+function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.86) {
   return new Promise<Uint8Array>((resolve, reject) => {
     canvas.toBlob(
       async (blob) => {
@@ -1525,6 +1533,11 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [messengerPackageBusy, setMessengerPackageBusy] = useState(false);
   const [messengerPackageStatus, setMessengerPackageStatus] = useState("");
   const [messengerPackageFiles, setMessengerPackageFiles] = useState<MessengerPackageFiles | null>(null);
+  const [messengerTopRightPreview, setMessengerTopRightPreview] = useState("");
+  const [messengerTopRightPreviewLoading, setMessengerTopRightPreviewLoading] = useState(false);
+  const [messengerTopRightPreviewError, setMessengerTopRightPreviewError] = useState("");
+  const messengerTopRightSignatureRef = useRef("");
+  const messengerTopRightLoadingRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1687,15 +1700,26 @@ export default function PlugCustomizer({ plugId }: Props) {
     pricing.unitPrice,
   ]);
 
+  // TEXT-ONLY MESSENGER MODE:
+  // อย่า Render Production PNG ตอนเข้าขั้นสั่งผลิต ถ้าผู้ใช้เลือกคุย Messenger
+  // จะสร้าง Production Preview เฉพาะเมื่อเลือกเส้นทาง “สั่งผลิตเลย” เท่านั้น
   useEffect(() => {
-    if (step !== "order") return;
+    if (step !== "order" || continuationChoice !== "order") return;
 
     const timer = window.setTimeout(() => {
       void refreshProductionOrderPreview();
     }, 140);
 
     return () => window.clearTimeout(timer);
-  }, [step, orderDesignSignature, productionReady]);
+  }, [step, continuationChoice, orderDesignSignature, productionReady]);
+
+  // TEXT-ONLY TEST MODE:
+  // ปิดการเตรียมภาพมุมบนเอียงขวาอัตโนมัติชั่วคราว
+  // เพื่อทดสอบ Messenger text + Webhook + Send API โดยไม่แตะ WebGL/PNG/PDF
+  useEffect(() => {
+    if (step !== "order") return;
+    setMessengerTopRightPreviewError("");
+  }, [step, orderDesignSignature]);
 
   function downloadDataUrl(src: string, filename: string) {
     if (!src) return;
@@ -1786,6 +1810,67 @@ export default function PlugCustomizer({ plugId }: Props) {
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     return new Blob([bytes], { type: mime });
+  }
+
+  async function canvasToPngBlob(canvas: HTMLCanvasElement) {
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("สร้าง PNG สำหรับ Messenger ไม่สำเร็จ"));
+          return;
+        }
+        resolve(blob);
+      }, "image/png");
+    });
+  }
+
+  async function preparePngForMessenger(src: string, maxBytes = 3_200_000) {
+    let blob = dataUrlToBlob(src);
+    if (blob.type === "image/png" && blob.size <= maxBytes) return blob;
+
+    const image = await loadDataUrlImage(src);
+    const originalWidth = image.naturalWidth || image.width;
+    const originalHeight = image.naturalHeight || image.height;
+    let scale = Math.min(1, 1600 / Math.max(originalWidth, originalHeight));
+
+    for (let attempt = 0; attempt < 7; attempt += 1) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(720, Math.round(originalWidth * scale));
+      canvas.height = Math.max(720, Math.round(originalHeight * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("สร้าง Canvas สำหรับ PNG ไม่สำเร็จ");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      blob = await canvasToPngBlob(canvas);
+      if (blob.size <= maxBytes) return blob;
+      scale *= 0.82;
+    }
+
+    if (blob.size > maxBytes) {
+      throw new Error(`PNG มีขนาดใหญ่เกินไป (${(blob.size / 1024 / 1024).toFixed(2)} MB) กรุณาลดความละเอียดแล้วลองใหม่`);
+    }
+    return blob;
+  }
+
+  async function uploadMessengerAttachment(
+    blob: Blob,
+    filename: string,
+    type: "image" | "file"
+  ) {
+    const formData = new FormData();
+    formData.set("type", type);
+    formData.set("file", blob, filename);
+
+    const response = await fetchWithTimeout(
+      "/api/messenger/attachment",
+      { method: "POST", body: formData },
+      45_000
+    );
+    const result = (await response.json()) as MessengerAttachmentUploadResponse;
+    if (!response.ok || !result.ok || !result.attachmentId) {
+      throw new Error(result.error || `อัปโหลด ${filename} เข้า Meta ไม่สำเร็จ`);
+    }
+    return result.attachmentId;
   }
 
   function openMessenger(referralRef?: string, popup?: Window | null) {
@@ -1903,187 +1988,25 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    const mainRender = renderRef.current;
-    const productionRender = productionRenderRef.current;
-    if (!mainRender || !productionRender) {
-      setOrderError("โมเดล Mockup หรือ Production ยังโหลดไม่พร้อม กรุณารอสักครู่แล้วลองอีกครั้ง");
-      return;
-    }
-
-    // เปิดหน้าต่างทันทีจาก user gesture เพื่อไม่ให้ browser บล็อก popup หลัง await
-    const messengerPopup = window.open("about:blank", "_blank");
-    updateMessengerPopup(
-      messengerPopup,
-      "กำลังตรวจสอบ Meta Messenger...",
-      "ระบบกำลังตรวจสอบ META_PAGE_ACCESS_TOKEN, META_APP_SECRET และ META_WEBHOOK_VERIFY_TOKEN ก่อนสร้างไฟล์"
-    );
-
+    // TEXT-ONLY MANUAL SEND MODE
+    // เปิด Facebook Messages จาก user gesture ทันที แล้วคัดลอกข้อความสรุปทั้งหมด
+    // เพื่อให้ผู้ใช้กด Ctrl+V / วาง และกดส่งเองในแชต
     setMessengerPackageBusy(true);
-    setMessengerPackageStatus("กำลังตรวจสอบการตั้งค่า Meta Messenger...");
     setOrderError("");
+    setMessengerPackageStatus("โหมดข้อความอย่างเดียว • กำลังคัดลอกข้อความและเปิดแชต Adsawin Thailand...");
+
+    // เปิดก่อน await เพื่อป้องกัน browser บล็อก popup
+    window.open(MESSENGER_DESKTOP_FALLBACK_URL, "_blank", "noopener,noreferrer");
 
     try {
-      const configStatus = await readMessengerConfigStatus();
-      if (!configStatus.configured) {
-        const missingText = configStatus.missing.join(", ");
-        throw new Error(
-          `ยังเชื่อม Meta Messenger ไม่ครบ\nขาด: ${missingText}\n\nใส่ค่าใน .env.local แล้ว Restart ด้วย npm run dev ใหม่อีกครั้ง`
-        );
-      }
-
-      setMessengerPackageStatus(`Meta พร้อม • ${configStatus.graphVersion} • กำลังสร้างภาพไฟล์ผลิต...`);
-      updateMessengerPopup(
-        messengerPopup,
-        "Meta Messenger พร้อม",
-        `เชื่อมต่อ Environment แล้ว (${configStatus.graphVersion})\nกำลังสร้าง Production PNG...`
-      );
-
-      const orderId = createOrderId();
-      const productionFileName = `${orderId}-production.png`;
-      const topRightFileName = `${orderId}-top-right.png`;
-      const pdfFileName = `${orderId}-order.pdf`;
-
-      const productionSrc = await renderWithTimeout(
-        productionRender({
-          transparent: true,
-          view: "top",
-          download: false,
-          width: 1800,
-          height: 1800,
-          filename: productionFileName,
-        }),
-        30_000,
-        "สร้าง Production PNG ใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
-      );
-      if (!productionSrc) throw new Error("สร้างไฟล์ผลิตไม่สำเร็จ");
-
-      setMessengerPackageStatus("กำลังสร้างภาพมุมบนเอียงขวา...");
-      updateMessengerPopup(messengerPopup, "กำลังสร้างภาพ", "Production PNG สำเร็จ\nกำลังสร้างภาพมุมบนเอียงขวา...");
-      const topRightSrc = await renderWithTimeout(
-        mainRender({
-          transparent: false,
-          view: "topRight",
-          download: false,
-          width: 1600,
-          height: 1600,
-          filename: topRightFileName,
-        }),
-        30_000,
-        "สร้างภาพมุมบนเอียงขวาใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
-      );
-      if (!topRightSrc) throw new Error("สร้างภาพมุมบนเอียงขวาไม่สำเร็จ");
-
-      const topLabel = getColorLabel(
-        safeColors.top ?? customization.topColor,
-        currentColorOptions.top
-      );
-      const bottomLabel = getColorLabel(
-        safeColors.bottom ?? customization.bottomColor,
-        currentColorOptions.bottom
-      );
-      const switchLabel = showQuickSwitch
-        ? getColorLabel(
-            safeColors.switch ?? customization.switchColor,
-            currentColorOptions.switch ?? currentColorOptions.top
-          )
-        : undefined;
-
-      setMessengerPackageStatus("กำลังสร้าง PDF สรุปแบบ...");
-      updateMessengerPopup(messengerPopup, "กำลังสร้าง PDF", "ภาพมุมบนเอียงขวาสำเร็จ\nกำลังรวมข้อมูลเป็น PDF สรุปแบบ...");
-      const pdfBlob = await createMessengerPdfBlob({
-        orderId,
-        modelName: plug.name ?? selectedPlugId,
-        modelId: selectedPlugId,
-        quantity: parsedOrderQuantity,
-        unitPrice: formatPrice(pricing.unitPrice),
-        totalPrice: formatPrice(pricing.totalPrice),
-        priceRange: `${pricing.minQty}-${pricing.maxQty} ชิ้น`,
-        topColor: topLabel,
-        bottomColor: bottomLabel,
-        switchColor: switchLabel,
-        patternText: hasPattern ? "มีลาย" : "ไม่มีลาย",
-        logoText: `${logoCount} จุด`,
-        topRightSrc,
-        productionSrc,
-      });
-
-      const pdfUrl = URL.createObjectURL(pdfBlob);
-      setMessengerPackageStatus("กำลังส่ง PDF และรูปขึ้น Meta โดยตรง...");
-      updateMessengerPopup(messengerPopup, "กำลังอัปโหลดเข้า Meta", "กำลังส่ง PDF + Production PNG + ภาพมุมบนเอียงขวาเข้า Meta Messenger...\nกรุณาอย่าปิดหน้าต่างนี้");
-
-      const formData = new FormData();
-      formData.set(
-        "metadata",
-        JSON.stringify({
-          orderId,
-          createdAt: new Date().toISOString(),
-          modelId: selectedPlugId,
-          modelName: plug.name ?? selectedPlugId,
-          quantity: parsedOrderQuantity,
-          unitPrice: pricing.unitPrice,
-          totalPrice: pricing.totalPrice,
-          priceRange: `${pricing.minQty}-${pricing.maxQty} ชิ้น`,
-          topColor: topLabel,
-          bottomColor: bottomLabel,
-          switchColor: switchLabel,
-          patternText: hasPattern ? "มีลาย" : "ไม่มีลาย",
-          logoText: `${logoCount} จุด`,
-          hasPattern,
-          logoCount,
-        })
-      );
-      formData.set("pdf", pdfBlob, pdfFileName);
-      formData.set("production", dataUrlToBlob(productionSrc), productionFileName);
-      formData.set("topRight", dataUrlToBlob(topRightSrc), topRightFileName);
-
-      const uploadResponse = await fetchWithTimeout(
-        "/api/messenger/package",
-        { method: "POST", body: formData },
-        120_000
-      );
-      const uploadResult = (await uploadResponse.json()) as MessengerUploadResponse;
-      if (!uploadResponse.ok || !uploadResult.ok || !uploadResult.referralRef) {
-        const missing = uploadResult.missing?.length ? `\nขาด: ${uploadResult.missing.join(", ")}` : "";
-        throw new Error(`${uploadResult.error || "เตรียมชุดไฟล์ Messenger ไม่สำเร็จ"}${missing}`);
-      }
-
-      const nextFiles: MessengerPackageFiles = {
-        orderId,
-        pdfUrl,
-        pdfFileName,
-        productionUrl: productionSrc,
-        productionFileName,
-        topRightUrl: topRightSrc,
-        topRightFileName,
-      };
-      setMessengerPackageFiles((previous) => {
-        if (previous?.pdfUrl?.startsWith("blob:")) URL.revokeObjectURL(previous.pdfUrl);
-        return nextFiles;
-      });
-
-      const summary = buildMessengerSummary(orderId);
-      await copyMessengerSummary(summary);
-
+      await copyMessengerSummary(messengerSummaryText);
       setMessengerPackageStatus(
-        `พร้อมส่งอัตโนมัติ • Order ID: ${orderId} • ไม่บันทึก Order ในฐานข้อมูล • กำลังเปิด Messenger`
+        "คัดลอกข้อความแล้ว ✓ • เปิดแชต Adsawin Thailand แล้ว • กด Ctrl+V หรือวาง แล้วกดส่ง"
       );
-
-      updateMessengerPopup(messengerPopup, "พร้อมเปิด Messenger", `Order ID: ${orderId}\nกำลังเปิด Messenger ของ Adsawin Thailand...`);
-      window.setTimeout(() => {
-        openMessenger(uploadResult.referralRef, messengerPopup);
-      }, 350);
     } catch (error) {
-      const message = error instanceof Error
-        ? (error.name === "AbortError" ? "การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจอินเทอร์เน็ต/Meta Token แล้วลองใหม่" : error.message)
-        : "สร้างชุดไฟล์ Messenger ไม่สำเร็จ";
-      setMessengerPackageStatus("");
-      setOrderError(message);
-      updateMessengerPopup(
-        messengerPopup,
-        "ยังส่งเข้า Messenger ไม่สำเร็จ",
-        `${message}\n\nหากเพิ่งแก้ .env.local ให้หยุด server แล้วรัน npm run dev ใหม่`,
-        true
-      );
+      const message = error instanceof Error ? error.message : "คัดลอกข้อความไม่สำเร็จ";
+      setMessengerPackageStatus("เปิดแชต Adsawin Thailand แล้ว");
+      setOrderError(`${message} กรุณากดปุ่ม “คัดลอกข้อความ” แล้ววางในแชต`);
     } finally {
       setMessengerPackageBusy(false);
     }
@@ -2102,6 +2025,73 @@ export default function PlugCustomizer({ plugId }: Props) {
     if (!shippingInfo.postalCode.trim()) return "กรุณากรอกรหัสไปรษณีย์";
     if (!orderConfirmed) return "กรุณาติ๊กยืนยันข้อมูลก่อนสั่งผลิต";
     return "";
+  }
+
+  async function refreshMessengerTopRightPreview() {
+    if (messengerTopRightLoadingRef.current) return;
+
+    const currentSignature = orderDesignSignature;
+    if (
+      messengerTopRightPreview &&
+      messengerTopRightSignatureRef.current === currentSignature
+    ) {
+      return;
+    }
+
+    // ถ้า Step 5 มีภาพมุมบนเอียงขวาของดีไซน์ปัจจุบันอยู่แล้ว ใช้ภาพนั้นทันที
+    // เพื่อไม่ต้อง Render ซ้ำแม้แต่ตอนเข้า Step 6
+    if (!messengerTopRightSignatureRef.current && viewPreviewMap.topRight) {
+      setMessengerTopRightPreview(viewPreviewMap.topRight);
+      messengerTopRightSignatureRef.current = currentSignature;
+      setMessengerTopRightPreviewError("");
+      return;
+    }
+
+    const render = renderRef.current;
+    if (!render) {
+      setMessengerTopRightPreview("");
+      setMessengerTopRightPreviewError("โมเดล Mockup ยังไม่พร้อมสำหรับภาพมุมบนเอียงขวา");
+      return;
+    }
+
+    messengerTopRightLoadingRef.current = true;
+    setMessengerTopRightPreviewLoading(true);
+    setMessengerTopRightPreviewError("");
+
+    try {
+      // สร้างล่วงหน้าใน Step 6 เพื่อให้ปุ่ม Messenger ทำหน้าที่ส่งอย่างเดียว
+      // 1000x1000 เพียงพอสำหรับแชตและ PDF และเบากว่า render 1400/1800 ขณะกดส่ง
+      const src = await renderWithTimeout(
+        render({
+          transparent: false,
+          view: "topRight",
+          download: false,
+          width: 1000,
+          height: 1000,
+          filename: `plug-${selectedPlugId}-top-right-messenger-preview.png`,
+        }),
+        30_000,
+        "เตรียมภาพมุมบนเอียงขวาใช้เวลานานเกิน 30 วินาที กรุณากดรีเฟรชอีกครั้ง"
+      );
+
+      if (!src) {
+        setMessengerTopRightPreview("");
+        setMessengerTopRightPreviewError("เตรียมภาพมุมบนเอียงขวาไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+        return;
+      }
+
+      setMessengerTopRightPreview(src);
+      messengerTopRightSignatureRef.current = currentSignature;
+      setViewPreviewMap((prev) => ({ ...prev, topRight: src }));
+    } catch (error) {
+      setMessengerTopRightPreview("");
+      setMessengerTopRightPreviewError(
+        error instanceof Error ? error.message : "เตรียมภาพมุมบนเอียงขวาไม่สำเร็จ"
+      );
+    } finally {
+      messengerTopRightLoadingRef.current = false;
+      setMessengerTopRightPreviewLoading(false);
+    }
   }
 
   async function refreshProductionOrderPreview() {
@@ -2706,6 +2696,11 @@ export default function PlugCustomizer({ plugId }: Props) {
     productionRenderRef.current = null;
     setProductionReady(false);
     setProductionOrderPreview("");
+    setMessengerTopRightPreview("");
+    setMessengerTopRightPreviewLoading(false);
+    setMessengerTopRightPreviewError("");
+    messengerTopRightSignatureRef.current = "";
+    messengerTopRightLoadingRef.current = false;
     setOrderSnapshot(null);
     setOrderConfirmed(false);
     setOrderError("");
@@ -3349,39 +3344,34 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <button
                   type="button"
                   className="btn btnPrimary"
-                  disabled={messengerPackageBusy || !pricing.pricingReady || !productionReady}
+                  disabled={
+                    messengerPackageBusy ||
+                    !pricing.pricingReady
+                  }
                   onClick={() => void createMessengerPackageAndOpen()}
                 >
-                  {messengerPackageBusy ? "กำลังสร้างและส่งข้อมูล..." : "ส่งรายละเอียดไป Messenger"}
+                  {messengerPackageBusy ? "กำลังส่งข้อมูล..." : "ส่งรายละเอียดไป Messenger"}
                 </button>
+              </div>
+
+              <div className="hint" style={{ marginTop: 8 }}>
+                เมื่อกด “ส่งรายละเอียดไป Messenger” ระบบจะคัดลอกข้อความในกรอบนี้ให้อัตโนมัติ
+                และเปิดแชต Adsawin Thailand ทันที จากนั้นกด Ctrl+V หรือวาง แล้วกดส่งได้เลย
               </div>
 
               {messengerPackageStatus && (
                 <div className="messengerPackageStatus">{messengerPackageStatus}</div>
               )}
 
-              {messengerPackageFiles && (
-                <div className="messengerFileGrid">
-                  <button type="button" className="btn btnGhost" onClick={() => downloadDataUrl(messengerPackageFiles.productionUrl, messengerPackageFiles.productionFileName)}>
-                    ดาวน์โหลดไฟล์ผลิต
-                  </button>
-                  <button type="button" className="btn btnGhost" onClick={() => downloadDataUrl(messengerPackageFiles.topRightUrl, messengerPackageFiles.topRightFileName)}>
-                    ดาวน์โหลดมุมบนเอียงขวา
-                  </button>
-                  <a className="btn btnGhost" href={messengerPackageFiles.pdfUrl} download={messengerPackageFiles.pdfFileName}>
-                    ดาวน์โหลด PDF
-                  </a>
-                </div>
-              )}
-
               <div className="hint" style={{ marginTop: 8 }}>
-                Facebook Page: <strong>Adsawin Thailand</strong> • ระบบไม่ใช้ฐานข้อมูลและไม่เก็บไฟล์บนเว็บ เมื่อกดส่ง ระบบจะอัปโหลด PDF + ไฟล์ผลิต + ภาพมุมบนเอียงขวาเข้า Meta โดยตรง แล้วเปิด Messenger ด้วย ref แบบเซ็นลายเซ็น Webhook จะส่งข้อความ + รูป 2 รูป + PDF เข้าห้องแชต จากนั้นจบขั้นตอนและคุยงานต่อใน Messenger ได้เลย
+                โหมดทดสอบข้อความอย่างเดียว: <strong>ยังไม่สร้างรูป ยังไม่สร้าง PDF และยังไม่อัปโหลดไฟล์เข้า Meta</strong>
+                ระบบจะคัดลอกเฉพาะข้อความสรุปด้านบน แล้วเปิดแชต Adsawin Thailand ให้คุณวางข้อความและกดส่งเอง
               </div>
               <button type="button" className="btn btnGhost" style={{ marginTop: 8 }} onClick={openFacebookSessionFallback}>
                 เปิด Facebook Messages ด้วยบัญชีที่ล็อกอินอยู่ (สำรอง)
               </button>
               <div className="hint" style={{ marginTop: 6 }}>
-                ปุ่มสำรองด้านบนช่วยกรณี m.me ขอ Login ใหม่บนคอม แต่เป็นเพียงการเปิดแชต จึงจะไม่ส่งชุดไฟล์อัตโนมัติ
+                ปุ่มนี้เปิด Facebook Messages โดยตรงด้วยบัญชีที่ล็อกอินอยู่ และจะไม่ส่งรูปหรือ PDF อัตโนมัติ
               </div>
             </div>
           )}
