@@ -160,6 +160,21 @@ const FACEBOOK_PAGE_ID = "110219891504385";
 const MESSENGER_REFERRAL_URL = `https://m.me/${FACEBOOK_PAGE_USERNAME}`;
 const MESSENGER_DESKTOP_FALLBACK_URL = `https://www.facebook.com/messages/t/${FACEBOOK_PAGE_ID}`;
 
+function isMobileMessengerDevice() {
+  if (typeof navigator === "undefined") return false;
+
+  const nav = navigator as Navigator & {
+    userAgentData?: { mobile?: boolean };
+  };
+  if (typeof nav.userAgentData?.mobile === "boolean") {
+    return nav.userAgentData.mobile;
+  }
+
+  const ua = navigator.userAgent || "";
+  const iPadDesktopMode = /Macintosh/i.test(ua) && navigator.maxTouchPoints > 1;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || iPadDesktopMode;
+}
+
 const PRICE_TIERS: Record<string, PriceTier[]> = {
   "TYPE-1": [
     { min: 12, max: 100, unitPrice: 389 },
@@ -1988,17 +2003,50 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    // ONE-CLICK TEXT REFERRAL:
-    // ไม่สร้าง PNG / PDF และไม่อัปโหลดไฟล์
-    // สร้าง signed ref ฝั่ง Server แล้วเปิด m.me?ref=...
-    // Meta จะส่ง messaging_referrals (หรือ postback.referral สำหรับ Get Started)
-    // เข้า Webhook พร้อม PSID จากนั้น Webhook ส่งข้อความ Order เข้าแชตอัตโนมัติ
+    const isMobile = isMobileMessengerDevice();
+
+    // PC / Desktop:
+    // m.me referral บน desktop มีโอกาสถูกพาไปหน้า Messenger เก่าหรือหน้า unavailable
+    // จึงเปิด Facebook Messages โดยตรงด้วย Page ID ที่ทดสอบแล้ว และคัดลอก Order ให้พร้อมวาง
+    // Browser ไม่อนุญาตให้เว็บภายนอก paste / send เข้า facebook.com อัตโนมัติ
+    if (!isMobile) {
+      setMessengerPackageBusy(true);
+      setOrderError("");
+      setMessengerPackageStatus("PC: กำลังคัดลอกข้อมูล Order และเปิด Facebook Messages...");
+
+      // เปิดทันทีจาก user gesture ป้องกัน popup blocker
+      const chatWindow = window.open(
+        MESSENGER_DESKTOP_FALLBACK_URL,
+        "_blank",
+        "noopener,noreferrer"
+      );
+
+      try {
+        await copyMessengerSummary(buildMessengerSummary());
+        setMessengerPackageStatus(
+          chatWindow
+            ? "PC: เปิดแชต Adsawin Thailand แล้ว ✓ • ข้อมูล Order ถูกคัดลอกแล้ว กด Ctrl+V แล้วส่ง"
+            : "PC: ข้อมูล Order ถูกคัดลอกแล้ว ✓ • Browser บล็อกหน้าต่างใหม่ กรุณากดปุ่มเปิด Facebook Messages ด้านล่าง"
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "คัดลอกข้อความไม่สำเร็จ";
+        setMessengerPackageStatus("PC: เปิดแชต Adsawin Thailand แล้ว");
+        setOrderError(`${message} กรุณาคัดลอกข้อความจากกล่องสรุปแล้ววางใน Facebook Messages`);
+      } finally {
+        setMessengerPackageBusy(false);
+      }
+      return;
+    }
+
+    // Mobile:
+    // ใช้ signed m.me referral เพื่อให้ Meta ส่ง PSID + ref เข้า Webhook
+    // แล้ว Webhook ส่งข้อความ Order เข้าแชตอัตโนมัติ โดยยังไม่มี PNG / PDF
     const orderId = createOrderId();
     const messengerPopup = window.open("about:blank", "_blank");
 
     setMessengerPackageBusy(true);
     setOrderError("");
-    setMessengerPackageStatus("กำลังเตรียมลิงก์ Messenger พร้อมข้อมูลคำสั่งซื้อ...");
+    setMessengerPackageStatus("มือถือ: กำลังเตรียมลิงก์ Messenger พร้อมข้อมูลคำสั่งซื้อ...");
     updateMessengerPopup(
       messengerPopup,
       "กำลังเตรียม Messenger...",
@@ -2034,7 +2082,7 @@ export default function PlugCustomizer({ plugId }: Props) {
       }
 
       setMessengerPackageStatus(
-        `พร้อมส่งข้อความอัตโนมัติ • Order ID: ${orderId} • กำลังเปิด Messenger...`
+        `มือถือ: พร้อมส่งข้อความอัตโนมัติ • Order ID: ${orderId} • กำลังเปิด Messenger...`
       );
       updateMessengerPopup(
         messengerPopup,
@@ -3405,7 +3453,8 @@ export default function PlugCustomizer({ plugId }: Props) {
               </div>
 
               <div className="hint" style={{ marginTop: 8 }}>
-                กดครั้งเดียว ระบบจะเปิด Messenger พร้อม <strong>ref ของ Order</strong> และส่งข้อมูลรุ่น / จำนวน / ราคาเข้าแชตอัตโนมัติผ่าน Webhook
+                <strong>มือถือ:</strong> กดครั้งเดียว ใช้ m.me referral และส่งข้อมูล Order เข้าแชตอัตโนมัติผ่าน Webhook<br />
+                <strong>PC:</strong> เปิด Facebook Messages ที่ล็อกอินอยู่และคัดลอกข้อมูล Order ให้อัตโนมัติ จากนั้นกด Ctrl+V แล้วส่ง
               </div>
 
               {messengerPackageStatus && (
@@ -3413,7 +3462,7 @@ export default function PlugCustomizer({ plugId }: Props) {
               )}
 
               <div className="hint" style={{ marginTop: 8 }}>
-                <strong>รอบนี้ส่งเฉพาะข้อความก่อน</strong> ยังไม่สร้างรูปและ PDF เพื่อทดสอบ one-click referral ให้ผ่านก่อน
+                <strong>รอบนี้ส่งเฉพาะข้อความก่อน</strong> ยังไม่สร้างรูปและ PDF • PC ใช้ Facebook Messages โดยตรงเพื่อเลี่ยงหน้า m.me ที่ใช้งานไม่ได้
               </div>
               <button type="button" className="btn btnGhost" style={{ marginTop: 8 }} onClick={openFacebookSessionFallback}>
                 เปิด Facebook Messages ด้วยบัญชีที่ล็อกอินอยู่ (สำรอง)
