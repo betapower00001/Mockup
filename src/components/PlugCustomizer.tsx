@@ -156,9 +156,8 @@ const DEFAULT_SHIPPING_INFO: ShippingInfo = {
 };
 
 const FACEBOOK_PAGE_USERNAME = "adsawinthailand";
-const FACEBOOK_PAGE_ID = "110219891504385";
 const MESSENGER_REFERRAL_URL = `https://m.me/${FACEBOOK_PAGE_USERNAME}`;
-const MESSENGER_DESKTOP_FALLBACK_URL = `https://www.facebook.com/messages/t/${FACEBOOK_PAGE_ID}`;
+const MESSENGER_DESKTOP_FALLBACK_URL = `https://www.facebook.com/messages/t/${FACEBOOK_PAGE_USERNAME}`;
 
 const PRICE_TIERS: Record<string, PriceTier[]> = {
   "TYPE-1": [
@@ -1238,13 +1237,6 @@ type MessengerUploadResponse = {
   missing?: string[];
 };
 
-type MessengerAttachmentUploadResponse = {
-  ok: boolean;
-  attachmentId?: string;
-  error?: string;
-  code?: string;
-};
-
 type MessengerConfigStatus = {
   ok: boolean;
   configured: boolean;
@@ -1296,7 +1288,7 @@ function drawImageContain(
   ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
 }
 
-function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.86) {
+function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.92) {
   return new Promise<Uint8Array>((resolve, reject) => {
     canvas.toBlob(
       async (blob) => {
@@ -1796,67 +1788,6 @@ export default function PlugCustomizer({ plugId }: Props) {
     return new Blob([bytes], { type: mime });
   }
 
-  async function canvasToPngBlob(canvas: HTMLCanvasElement) {
-    return new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          reject(new Error("สร้าง PNG สำหรับ Messenger ไม่สำเร็จ"));
-          return;
-        }
-        resolve(blob);
-      }, "image/png");
-    });
-  }
-
-  async function preparePngForMessenger(src: string, maxBytes = 3_200_000) {
-    let blob = dataUrlToBlob(src);
-    if (blob.type === "image/png" && blob.size <= maxBytes) return blob;
-
-    const image = await loadDataUrlImage(src);
-    const originalWidth = image.naturalWidth || image.width;
-    const originalHeight = image.naturalHeight || image.height;
-    let scale = Math.min(1, 1600 / Math.max(originalWidth, originalHeight));
-
-    for (let attempt = 0; attempt < 7; attempt += 1) {
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(720, Math.round(originalWidth * scale));
-      canvas.height = Math.max(720, Math.round(originalHeight * scale));
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("สร้าง Canvas สำหรับ PNG ไม่สำเร็จ");
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-      blob = await canvasToPngBlob(canvas);
-      if (blob.size <= maxBytes) return blob;
-      scale *= 0.82;
-    }
-
-    if (blob.size > maxBytes) {
-      throw new Error(`PNG มีขนาดใหญ่เกินไป (${(blob.size / 1024 / 1024).toFixed(2)} MB) กรุณาลดความละเอียดแล้วลองใหม่`);
-    }
-    return blob;
-  }
-
-  async function uploadMessengerAttachment(
-    blob: Blob,
-    filename: string,
-    type: "image" | "file"
-  ) {
-    const formData = new FormData();
-    formData.set("type", type);
-    formData.set("file", blob, filename);
-
-    const response = await fetchWithTimeout(
-      "/api/messenger/attachment",
-      { method: "POST", body: formData },
-      45_000
-    );
-    const result = (await response.json()) as MessengerAttachmentUploadResponse;
-    if (!response.ok || !result.ok || !result.attachmentId) {
-      throw new Error(result.error || `อัปโหลด ${filename} เข้า Meta ไม่สำเร็จ`);
-    }
-    return result.attachmentId;
-  }
-
   function openMessenger(referralRef?: string, popup?: Window | null) {
     const referral = encodeURIComponent(referralRef || `mockup-${selectedPlugId}`);
 
@@ -1972,18 +1903,19 @@ export default function PlugCustomizer({ plugId }: Props) {
       return;
     }
 
-    // ใช้ Production PNG จาก Preview ที่ Step 6 สร้างไว้แล้ว
-    // ไม่สั่ง Production GLB render ซ้ำตอนกด Messenger
-    if (!productionOrderPreview) {
-      setOrderError("ยังไม่มี Production PNG กรุณารอให้ตัวอย่างไฟล์ผลิตแสดงก่อน แล้วลองส่ง Messenger อีกครั้ง");
+    const mainRender = renderRef.current;
+    const productionRender = productionRenderRef.current;
+    if (!mainRender || !productionRender) {
+      setOrderError("โมเดล Mockup หรือ Production ยังโหลดไม่พร้อม กรุณารอสักครู่แล้วลองอีกครั้ง");
       return;
     }
 
+    // เปิดหน้าต่างทันทีจาก user gesture เพื่อไม่ให้ browser บล็อก popup หลัง await
     const messengerPopup = window.open("about:blank", "_blank");
     updateMessengerPopup(
       messengerPopup,
       "กำลังตรวจสอบ Meta Messenger...",
-      "ระบบกำลังตรวจสอบการเชื่อมต่อก่อนส่งไฟล์"
+      "ระบบกำลังตรวจสอบ META_PAGE_ACCESS_TOKEN, META_APP_SECRET และ META_WEBHOOK_VERIFY_TOKEN ก่อนสร้างไฟล์"
     );
 
     setMessengerPackageBusy(true);
@@ -1994,42 +1926,51 @@ export default function PlugCustomizer({ plugId }: Props) {
       const configStatus = await readMessengerConfigStatus();
       if (!configStatus.configured) {
         const missingText = configStatus.missing.join(", ");
-        throw new Error(`ยังเชื่อม Meta Messenger ไม่ครบ\nขาด: ${missingText}`);
+        throw new Error(
+          `ยังเชื่อม Meta Messenger ไม่ครบ\nขาด: ${missingText}\n\nใส่ค่าใน .env.local แล้ว Restart ด้วย npm run dev ใหม่อีกครั้ง`
+        );
       }
+
+      setMessengerPackageStatus(`Meta พร้อม • ${configStatus.graphVersion} • กำลังสร้างภาพไฟล์ผลิต...`);
+      updateMessengerPopup(
+        messengerPopup,
+        "Meta Messenger พร้อม",
+        `เชื่อมต่อ Environment แล้ว (${configStatus.graphVersion})\nกำลังสร้าง Production PNG...`
+      );
 
       const orderId = createOrderId();
       const productionFileName = `${orderId}-production.png`;
       const topRightFileName = `${orderId}-top-right.png`;
       const pdfFileName = `${orderId}-order.pdf`;
 
-      setMessengerPackageStatus("กำลังเตรียม Production PNG จาก Preview...");
-      updateMessengerPopup(
-        messengerPopup,
-        "กำลังเตรียม PNG",
-        "ใช้ Production PNG จาก Preview ที่มีอยู่แล้ว ไม่ Render โมเดลผลิตซ้ำ"
+      const productionSrc = await renderWithTimeout(
+        productionRender({
+          transparent: true,
+          view: "top",
+          download: false,
+          width: 1800,
+          height: 1800,
+          filename: productionFileName,
+        }),
+        30_000,
+        "สร้าง Production PNG ใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
       );
-      const productionSrc = productionOrderPreview;
+      if (!productionSrc) throw new Error("สร้างไฟล์ผลิตไม่สำเร็จ");
 
-      setMessengerPackageStatus("กำลังเตรียมภาพมุมบนเอียงขวา PNG...");
-      let topRightSrc = viewPreviewMap.topRight ?? "";
-      if (!topRightSrc) {
-        const mainRender = renderRef.current;
-        if (!mainRender) throw new Error("โมเดล Mockup ยังไม่พร้อมสำหรับภาพมุมบนเอียงขวา");
-        const fallbackTopRight = await Promise.race([
-          mainRender({
-            transparent: false,
-            view: "topRight",
-            download: false,
-            width: 1400,
-            height: 1400,
-            filename: topRightFileName,
-          }),
-          new Promise<never>((_, reject) =>
-            window.setTimeout(() => reject(new Error("สร้างภาพมุมบนเอียงขวาใช้เวลานานเกิน 20 วินาที")), 20_000)
-          ),
-        ]);
-        topRightSrc = fallbackTopRight || "";
-      }
+      setMessengerPackageStatus("กำลังสร้างภาพมุมบนเอียงขวา...");
+      updateMessengerPopup(messengerPopup, "กำลังสร้างภาพ", "Production PNG สำเร็จ\nกำลังสร้างภาพมุมบนเอียงขวา...");
+      const topRightSrc = await renderWithTimeout(
+        mainRender({
+          transparent: false,
+          view: "topRight",
+          download: false,
+          width: 1600,
+          height: 1600,
+          filename: topRightFileName,
+        }),
+        30_000,
+        "สร้างภาพมุมบนเอียงขวาใช้เวลานานเกิน 30 วินาที กรุณาลองใหม่อีกครั้ง"
+      );
       if (!topRightSrc) throw new Error("สร้างภาพมุมบนเอียงขวาไม่สำเร็จ");
 
       const topLabel = getColorLabel(
@@ -2047,12 +1988,8 @@ export default function PlugCustomizer({ plugId }: Props) {
           )
         : undefined;
 
-      setMessengerPackageStatus("PNG พร้อม • กำลังสร้าง PDF สรุปแบบ...");
-      updateMessengerPopup(
-        messengerPopup,
-        "PNG พร้อมแล้ว",
-        "Production PNG + ภาพมุมบนเอียงขวา PNG พร้อม\nกำลังสร้าง PDF สรุปแบบ..."
-      );
+      setMessengerPackageStatus("กำลังสร้าง PDF สรุปแบบ...");
+      updateMessengerPopup(messengerPopup, "กำลังสร้าง PDF", "ภาพมุมบนเอียงขวาสำเร็จ\nกำลังรวมข้อมูลเป็น PDF สรุปแบบ...");
       const pdfBlob = await createMessengerPdfBlob({
         orderId,
         modelName: plug.name ?? selectedPlugId,
@@ -2070,71 +2007,42 @@ export default function PlugCustomizer({ plugId }: Props) {
         productionSrc,
       });
 
-      const productionBlob = await preparePngForMessenger(productionSrc);
-      const topRightBlob = await preparePngForMessenger(topRightSrc);
-      if (pdfBlob.size > 3_500_000) {
-        throw new Error(`PDF มีขนาดใหญ่เกินไป (${(pdfBlob.size / 1024 / 1024).toFixed(2)} MB)`);
-      }
-
       const pdfUrl = URL.createObjectURL(pdfBlob);
+      setMessengerPackageStatus("กำลังส่ง PDF และรูปขึ้น Meta โดยตรง...");
+      updateMessengerPopup(messengerPopup, "กำลังอัปโหลดเข้า Meta", "กำลังส่ง PDF + Production PNG + ภาพมุมบนเอียงขวาเข้า Meta Messenger...\nกรุณาอย่าปิดหน้าต่างนี้");
 
-      // อัปโหลดทีละไฟล์ เพื่อไม่ให้ request เดียวใหญ่เกิน limit ของ Vercel
-      // และทำให้รู้ทันทีว่าไฟล์ไหนมีปัญหา
-      setMessengerPackageStatus("กำลังอัปโหลด Production PNG เข้า Meta (1/3)...");
-      updateMessengerPopup(messengerPopup, "กำลังอัปโหลดเข้า Meta", "Production PNG • 1/3");
-      const productionAttachmentId = await uploadMessengerAttachment(
-        productionBlob,
-        productionFileName,
-        "image"
+      const formData = new FormData();
+      formData.set(
+        "metadata",
+        JSON.stringify({
+          orderId,
+          createdAt: new Date().toISOString(),
+          modelId: selectedPlugId,
+          modelName: plug.name ?? selectedPlugId,
+          quantity: parsedOrderQuantity,
+          unitPrice: pricing.unitPrice,
+          totalPrice: pricing.totalPrice,
+          priceRange: `${pricing.minQty}-${pricing.maxQty} ชิ้น`,
+          topColor: topLabel,
+          bottomColor: bottomLabel,
+          switchColor: switchLabel,
+          patternText: hasPattern ? "มีลาย" : "ไม่มีลาย",
+          logoText: `${logoCount} จุด`,
+          hasPattern,
+          logoCount,
+        })
       );
+      formData.set("pdf", pdfBlob, pdfFileName);
+      formData.set("production", dataUrlToBlob(productionSrc), productionFileName);
+      formData.set("topRight", dataUrlToBlob(topRightSrc), topRightFileName);
 
-      setMessengerPackageStatus("กำลังอัปโหลดภาพมุมบนเอียงขวาเข้า Meta (2/3)...");
-      updateMessengerPopup(messengerPopup, "กำลังอัปโหลดเข้า Meta", "ภาพมุมบนเอียงขวา PNG • 2/3");
-      const topRightAttachmentId = await uploadMessengerAttachment(
-        topRightBlob,
-        topRightFileName,
-        "image"
-      );
-
-      setMessengerPackageStatus("กำลังอัปโหลด PDF เข้า Meta (3/3)...");
-      updateMessengerPopup(messengerPopup, "กำลังอัปโหลดเข้า Meta", "PDF สรุปแบบ • 3/3");
-      const pdfAttachmentId = await uploadMessengerAttachment(pdfBlob, pdfFileName, "file");
-
-      const metadata = {
-        orderId,
-        createdAt: new Date().toISOString(),
-        modelId: selectedPlugId,
-        modelName: plug.name ?? selectedPlugId,
-        quantity: parsedOrderQuantity,
-        unitPrice: pricing.unitPrice,
-        totalPrice: pricing.totalPrice,
-        priceRange: `${pricing.minQty}-${pricing.maxQty} ชิ้น`,
-        topColor: topLabel,
-        bottomColor: bottomLabel,
-        switchColor: switchLabel,
-        patternText: hasPattern ? "มีลาย" : "ไม่มีลาย",
-        logoText: `${logoCount} จุด`,
-        hasPattern,
-        logoCount,
-      };
-
-      setMessengerPackageStatus("กำลังเตรียมลิงก์ Messenger...");
-      const packageResponse = await fetchWithTimeout(
+      const uploadResponse = await fetchWithTimeout(
         "/api/messenger/package",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            metadata,
-            pdfAttachmentId,
-            productionAttachmentId,
-            topRightAttachmentId,
-          }),
-        },
-        15_000
+        { method: "POST", body: formData },
+        120_000
       );
-      const uploadResult = (await packageResponse.json()) as MessengerUploadResponse;
-      if (!packageResponse.ok || !uploadResult.ok || !uploadResult.referralRef) {
+      const uploadResult = (await uploadResponse.json()) as MessengerUploadResponse;
+      if (!uploadResponse.ok || !uploadResult.ok || !uploadResult.referralRef) {
         const missing = uploadResult.missing?.length ? `\nขาด: ${uploadResult.missing.join(", ")}` : "";
         throw new Error(`${uploadResult.error || "เตรียมชุดไฟล์ Messenger ไม่สำเร็จ"}${missing}`);
       }
@@ -2159,24 +2067,21 @@ export default function PlugCustomizer({ plugId }: Props) {
       setMessengerPackageStatus(
         `พร้อมส่งอัตโนมัติ • Order ID: ${orderId} • ไม่บันทึก Order ในฐานข้อมูล • กำลังเปิด Messenger`
       );
-      updateMessengerPopup(
-        messengerPopup,
-        "พร้อมเปิด Messenger",
-        `Order ID: ${orderId}\nไฟล์อัปโหลดเข้า Meta ครบแล้ว กำลังเปิด Messenger ของ Adsawin Thailand...`
-      );
+
+      updateMessengerPopup(messengerPopup, "พร้อมเปิด Messenger", `Order ID: ${orderId}\nกำลังเปิด Messenger ของ Adsawin Thailand...`);
       window.setTimeout(() => {
         openMessenger(uploadResult.referralRef, messengerPopup);
       }, 350);
     } catch (error) {
       const message = error instanceof Error
-        ? (error.name === "AbortError" ? "การเชื่อมต่อใช้เวลานานเกินไป กรุณาลองใหม่" : error.message)
+        ? (error.name === "AbortError" ? "การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจอินเทอร์เน็ต/Meta Token แล้วลองใหม่" : error.message)
         : "สร้างชุดไฟล์ Messenger ไม่สำเร็จ";
       setMessengerPackageStatus("");
       setOrderError(message);
       updateMessengerPopup(
         messengerPopup,
         "ยังส่งเข้า Messenger ไม่สำเร็จ",
-        `${message}\n\nระบบหยุดที่ขั้นตอนที่มีปัญหาแล้ว สามารถลองใหม่ได้`,
+        `${message}\n\nหากเพิ่งแก้ .env.local ให้หยุด server แล้วรัน npm run dev ใหม่`,
         true
       );
     } finally {
