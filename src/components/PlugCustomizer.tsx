@@ -57,6 +57,7 @@ type ShippingInfo = {
 
 type PaymentMethod = "bank-transfer" | "invoice" | "contact-first";
 type ContinuationChoice = "" | "order" | "messenger";
+type InquiryWizardStep = 1 | 2 | 3 | 4;
 
 type PricingBreakdown = {
   unitPrice: number;
@@ -523,6 +524,46 @@ function cropTransparentBounds(img: HTMLImageElement, alphaThreshold = 8) {
     width: maxX - minX + 1,
     height: maxY - minY + 1,
   };
+}
+
+
+async function createCloseupMockupPreview(src: string, size = 900) {
+  const img = await loadImage(src);
+  const cropped = cropTransparentBounds(img, 6);
+
+  const out = document.createElement("canvas");
+  out.width = size;
+  out.height = size;
+  const ctx = out.getContext("2d");
+  if (!ctx) return src;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, size, size);
+
+  const sourceWidth = Math.max(1, cropped.width);
+  const sourceHeight = Math.max(1, cropped.height);
+  // ขยายสินค้าให้กินพื้นที่ประมาณ 88% ของเฟรม แต่ยังเหลือขอบหายใจรอบสินค้า
+  const maxWidth = size * 0.88;
+  const maxHeight = size * 0.88;
+  const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  const dx = (size - drawWidth) / 2;
+  const dy = (size - drawHeight) / 2;
+
+  ctx.drawImage(
+    cropped.canvas,
+    cropped.x,
+    cropped.y,
+    sourceWidth,
+    sourceHeight,
+    dx,
+    dy,
+    drawWidth,
+    drawHeight
+  );
+
+  return out.toDataURL("image/png");
 }
 
 
@@ -1466,14 +1507,14 @@ async function createMessengerPdfBlob(input: MessengerPdfInput) {
 
   ctx1.fillStyle = "#0f172a";
   ctx1.font = "700 30px Arial, Tahoma, sans-serif";
-  ctx1.fillText("มุมบนเอียงขวา", margin, 612);
+  ctx1.fillText("MOCKUP PREVIEW", margin, 612);
   ctx1.fillStyle = "#f8fafc";
   ctx1.fillRect(margin, 644, width - margin * 2, 900);
   drawImageContain(ctx1, topRightImage, margin + 20, 664, width - margin * 2 - 40, 860);
 
   ctx1.fillStyle = "#64748b";
   ctx1.font = "500 20px Arial, Tahoma, sans-serif";
-  ctx1.fillText("สร้างจากระบบ Mockup - ใช้ตรวจสอบแบบก่อนผลิต", margin, height - 72);
+  ctx1.fillText("Mockup preview captured from the current 3D view", margin, height - 72);
 
   const page2 = document.createElement("canvas");
   page2.width = width;
@@ -1528,6 +1569,7 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [orbitNudgeDirection, setOrbitNudgeDirection] = useState<OrbitNudgeDirection | null>(null);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [mobileAccordionOpen, setMobileAccordionOpen] = useState(true);
+  const [mobileViewDockOpen, setMobileViewDockOpen] = useState(false);
   const [viewPreviewMap, setViewPreviewMap] = useState<Partial<Record<RenderViewName, string>>>({});
   const [viewPreviewLoading, setViewPreviewLoading] = useState(false);
 
@@ -1540,7 +1582,7 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [orderBusy, setOrderBusy] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [orderSnapshot, setOrderSnapshot] = useState<ProductionOrderSnapshot | null>(null);
-  const [continuationChoice, setContinuationChoice] = useState<ContinuationChoice>("");
+  const [continuationChoice] = useState<ContinuationChoice>("messenger");
   const [customerInfo, setCustomerInfo] = useState<CustomerInfo>(DEFAULT_CUSTOMER_INFO);
   const [shippingInfo, setShippingInfo] = useState<ShippingInfo>(DEFAULT_SHIPPING_INFO);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("contact-first");
@@ -1553,6 +1595,17 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [messengerTopRightPreviewError, setMessengerTopRightPreviewError] = useState("");
   const messengerTopRightSignatureRef = useRef("");
   const messengerTopRightLoadingRef = useRef(false);
+
+  // Guided inquiry flow: ตรวจรายการ → เตรียม PDF + PNG → คัดลอกข้อความ → เปิดแชต
+  const [inquiryWizardStep, setInquiryWizardStep] = useState<InquiryWizardStep>(1);
+  const [inquiryOrderId, setInquiryOrderId] = useState("");
+  const [inquiryTextCopied, setInquiryTextCopied] = useState(false);
+  const [inquiryPdfDownloaded, setInquiryPdfDownloaded] = useState(false);
+  const [inquiryProductionDownloaded, setInquiryProductionDownloaded] = useState(false);
+  const [inquiryMockupDownloaded, setInquiryMockupDownloaded] = useState(false);
+  const [inquiryMockupPreview, setInquiryMockupPreview] = useState("");
+  const [inquiryFileBusy, setInquiryFileBusy] = useState(false);
+  const mainMockupStageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1715,26 +1768,60 @@ export default function PlugCustomizer({ plugId }: Props) {
     pricing.unitPrice,
   ]);
 
-  // TEXT-ONLY MESSENGER MODE:
-  // อย่า Render Production PNG ตอนเข้าขั้นสั่งผลิต ถ้าผู้ใช้เลือกคุย Messenger
-  // จะสร้าง Production Preview เฉพาะเมื่อเลือกเส้นทาง “สั่งผลิตเลย” เท่านั้น
+  // REAL-TIME PRODUCTION PREVIEW:
+  // เมื่อเข้าขั้น Order หรือแบบเปลี่ยน ให้ Production Preview อัปเดตอัตโนมัติ
+  // ใช้ Plug3D เดิม ไม่เพิ่ม RenderViewName และไม่แก้ Plug3D.tsx
   useEffect(() => {
-    if (step !== "order" || continuationChoice !== "order") return;
+    if (step !== "order" || !productionReady) return;
 
     const timer = window.setTimeout(() => {
       void refreshProductionOrderPreview();
-    }, 140);
+    }, 180);
 
     return () => window.clearTimeout(timer);
-  }, [step, continuationChoice, orderDesignSignature, productionReady]);
+  }, [step, orderDesignSignature, productionReady]);
 
-  // TEXT-ONLY TEST MODE:
-  // ปิดการเตรียมภาพมุมบนเอียงขวาอัตโนมัติชั่วคราว
-  // เพื่อทดสอบ Messenger text + Webhook + Send API โดยไม่แตะ WebGL/PNG/PDF
+  // REAL-TIME MOCKUP PREVIEW:
+  // ใช้มุม "angle" แบบคงที่ แล้วตัดพื้นที่ว่าง/ซูมสินค้าให้ใหญ่ขึ้น
+  // จึงเห็นมุมเอียงชัด ๆ โดยไม่ต้องแก้ Plug3D.tsx หรือไปยุ่งกับกล้องหลักของผู้ใช้
   useEffect(() => {
     if (step !== "order") return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const src = await renderInquiryAngleCloseup(900);
+          if (!cancelled && src) setInquiryMockupPreview(src);
+        } catch {
+          // ถ้า Render หลักยังไม่พร้อม ให้คงภาพเดิมไว้ แล้วจะลองใหม่เมื่อดีไซน์เปลี่ยน/กลับเข้าหน้า Order
+        }
+      })();
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [step, orderDesignSignature, selectedPlugId]);
+
+  // เมื่อแบบ/จำนวนเปลี่ยน ให้เริ่ม Guided Inquiry ใหม่เพื่อไม่ให้ส่งไฟล์คนละแบบ
+  useEffect(() => {
+    if (step !== "order" || continuationChoice !== "messenger") return;
+    setInquiryWizardStep(1);
+    setInquiryOrderId(createOrderId());
+    setInquiryTextCopied(false);
+    setInquiryPdfDownloaded(false);
+    setInquiryProductionDownloaded(false);
+    setInquiryMockupDownloaded(false);
+    setInquiryFileBusy(false);
+    setMessengerPackageStatus("");
     setMessengerTopRightPreviewError("");
-  }, [step, orderDesignSignature]);
+    setMessengerPackageFiles((prev) => {
+      if (prev?.pdfUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.pdfUrl);
+      return null;
+    });
+  }, [step, continuationChoice, orderDesignSignature, parsedOrderQuantity, pricing.unitPrice]);
 
   function downloadDataUrl(src: string, filename: string) {
     if (!src) return;
@@ -1788,6 +1875,29 @@ export default function PlugCustomizer({ plugId }: Props) {
 
   const messengerSummaryText = buildMessengerSummary(messengerPackageFiles?.orderId);
 
+  function buildInquirySummary() {
+    const id = inquiryOrderId || messengerPackageFiles?.orderId || "";
+    return [
+      "สนใจสอบถามสั่งผลิตสินค้า",
+      "",
+      `Mockup: ${plug.name ?? selectedPlugId}`,
+      `รุ่นสินค้า: ${selectedPlugId}`,
+      `จำนวน: ${parsedOrderQuantity || 0} ชิ้น`,
+      `ราคา/ชิ้น: ${pricing.pricingReady ? formatPrice(pricing.unitPrice) : pricing.message}`,
+      `ราคารวม: ${pricing.pricingReady ? formatPrice(pricing.totalPrice) : pricing.message}`,
+      id ? `Inquiry ID: ${id}` : "",
+      "",
+      "แนบไฟล์ประกอบการสอบถาม 3 ไฟล์",
+      "1) PDF สรุปรายการพร้อมรูป",
+      "2) ไฟล์ผลิต (Production PNG)",
+      "3) ภาพ Mockup ตามมุมที่เห็นบนหน้าจอ",
+      "",
+      "กรุณาตรวจสอบรายละเอียดและแจ้งกลับได้เลยค่ะ",
+    ].filter(Boolean).join("\n");
+  }
+
+  const inquirySummaryText = buildInquirySummary();
+
   async function copyMessengerSummary(text = messengerSummaryText) {
     try {
       if (navigator.clipboard?.writeText) {
@@ -1796,6 +1906,7 @@ export default function PlugCustomizer({ plugId }: Props) {
         throw new Error("Clipboard API unavailable");
       }
       setMessengerCopied(true);
+      setInquiryTextCopied(true);
       window.setTimeout(() => setMessengerCopied(false), 1800);
     } catch {
       // fallback สำหรับ browser/mobile บางรุ่นที่ไม่อนุญาต Clipboard หลัง async render
@@ -1810,6 +1921,7 @@ export default function PlugCustomizer({ plugId }: Props) {
         document.execCommand("copy");
         textarea.remove();
         setMessengerCopied(true);
+        setInquiryTextCopied(true);
         window.setTimeout(() => setMessengerCopied(false), 1800);
       } catch {
         setOrderError("คัดลอกข้อความสำหรับ Messenger ไม่สำเร็จ กรุณาคัดลอกข้อความจากกล่องสรุปด้วยตนเอง");
@@ -1989,73 +2101,265 @@ export default function PlugCustomizer({ plugId }: Props) {
     return result;
   }
 
-  async function createMessengerPackageAndOpen() {
-    if (parsedOrderQuantity < 12) {
-      setOrderError("ขั้นต่ำในการสั่งผลิต 12 ชิ้น");
-      return;
-    }
-    if (parsedOrderQuantity > 1000) {
-      setOrderError("จำนวนมากกว่า 1,000 ชิ้น กรุณาติดต่อเพื่อขอราคา");
-      return;
-    }
-    if (!pricing.pricingReady) {
-      setOrderError(pricing.message || "ไม่สามารถคำนวณราคาได้");
+  function validateShareOrder() {
+    if (parsedOrderQuantity < 12) return "ขั้นต่ำในการสั่งผลิต 12 ชิ้น";
+    if (parsedOrderQuantity > 1000) return "จำนวนมากกว่า 1,000 ชิ้น กรุณาติดต่อเพื่อขอราคา";
+    if (!pricing.pricingReady) return pricing.message || "ไม่สามารถคำนวณราคาได้";
+    return "";
+  }
+
+  async function shareOrderToFacebook() {
+    const validationError = validateShareOrder();
+    if (validationError) {
+      setOrderError(validationError);
       return;
     }
 
-    // SHARE TEXT ONLY:
-    // ใช้ Web Share API เหมือนปุ่มแชร์ทั่วไปของมือถือ/ระบบปฏิบัติการ
-    // รอบนี้ส่งเฉพาะข้อความ Order — ไม่สร้าง PNG, PDF และไม่เรียก Meta Send API
     const shareText = buildMessengerSummary();
+    const shareUrl = typeof window !== "undefined" ? window.location.href : "https://mockup-drab.vercel.app/";
+    const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`;
 
     setMessengerPackageBusy(true);
     setOrderError("");
-    setMessengerPackageStatus("กำลังเปิดเมนูแชร์ของเครื่อง...");
+    setMessengerPackageStatus("กำลังเปิด Facebook...");
+
+    // เปิดหน้าต่างก่อน await เพื่อไม่ให้ Browser บล็อก popup
+    const popup = window.open(facebookShareUrl, "_blank");
+    if (popup) popup.opener = null;
 
     try {
-      if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-        await navigator.share({
-          title: "รายละเอียดสั่งผลิต Adsawin",
-          text: shareText,
-        });
-        setMessengerPackageStatus("แชร์รายละเอียดแล้ว ✓");
-        return;
-      }
-
-      // Fallback สำหรับ PC/Browser ที่ไม่มี Web Share API:
-      // คัดลอกข้อความ แล้วเปิด Facebook Messages ที่ล็อกอินอยู่
+      // Facebook Share รับ URL เป็นหลัก จึงคัดลอก Order ไว้ให้ผู้ใช้กด Ctrl+V ในช่องข้อความได้ทันที
       await copyMessengerSummary(shareText);
-      const chatWindow = window.open(
-        MESSENGER_DESKTOP_FALLBACK_URL,
-        "_blank",
-        "noopener,noreferrer"
-      );
-
       setMessengerPackageStatus(
-        chatWindow
-          ? "Browser นี้ไม่มีเมนู Share • คัดลอกข้อมูลแล้ว ✓ • เปิด Facebook Messages แล้ว กด Ctrl+V แล้วส่ง"
-          : "Browser นี้ไม่มีเมนู Share • คัดลอกข้อมูลแล้ว ✓ • กรุณาเปิด Facebook Messages แล้ววางข้อความ"
+        popup
+          ? "เปิด Facebook แล้ว ✓ • คัดลอกข้อมูล Order แล้ว กด Ctrl+V ในช่องข้อความก่อนแชร์ได้เลย"
+          : "คัดลอกข้อมูล Order แล้ว ✓ • Browser บล็อกหน้าต่าง Facebook กรุณาอนุญาต Pop-up แล้วลองอีกครั้ง"
       );
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setMessengerPackageStatus("ยกเลิกการแชร์");
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : "เปิดเมนูแชร์ไม่สำเร็จ";
-
-      // ถ้า Share API มีแต่ทำงานไม่ได้ ให้พยายามคัดลอกข้อความไว้เป็น fallback
-      try {
-        await copyMessengerSummary(shareText);
-        setMessengerPackageStatus("แชร์โดยตรงไม่สำเร็จ แต่คัดลอกข้อความไว้แล้ว ✓");
-        setOrderError(`${message} กรุณาเลือกคัดลอก/เปิด Facebook Messages แล้ววางข้อความ`);
-      } catch {
-        setMessengerPackageStatus("");
-        setOrderError(message);
-      }
+      setMessengerPackageStatus(popup ? "เปิด Facebook แล้ว" : "");
+      setOrderError(error instanceof Error ? error.message : "เปิด Facebook ไม่สำเร็จ");
     } finally {
       setMessengerPackageBusy(false);
     }
+  }
+
+  function shareOrderToLine() {
+    const validationError = validateShareOrder();
+    if (validationError) {
+      setOrderError(validationError);
+      return;
+    }
+
+    const shareText = buildMessengerSummary();
+    const shareUrl = typeof window !== "undefined" ? window.location.href : "https://mockup-drab.vercel.app/";
+    const lineShareUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`;
+
+    setOrderError("");
+    setMessengerPackageStatus("กำลังเปิด LINE Share...");
+    const popup = window.open(lineShareUrl, "_blank");
+    if (popup) popup.opener = null;
+    setMessengerPackageStatus(
+      popup
+        ? "เปิด LINE Share แล้ว ✓ • เลือกผู้รับแล้วส่งได้เลย"
+        : "Browser บล็อกหน้าต่าง LINE กรุณาอนุญาต Pop-up แล้วลองอีกครั้ง"
+    );
+  }
+
+  async function renderInquiryAngleCloseup(size = 900) {
+    const render = renderRef.current;
+    if (!render) {
+      throw new Error("โมเดล Mockup ยังไม่พร้อม กรุณารอสักครู่แล้วลองอีกครั้ง");
+    }
+
+    const rawSrc = await renderWithTimeout(
+      render({
+        transparent: true,
+        view: "angle",
+        download: false,
+        width: size,
+        height: size,
+        filename: `plug-${selectedPlugId}-angle-closeup-preview.png`,
+      }),
+      25_000,
+      "สร้างภาพ Mockup มุมเอียงใช้เวลานานเกิน 25 วินาที กรุณาลองอีกครั้ง"
+    );
+
+    if (!rawSrc) throw new Error("สร้างภาพ Mockup มุมเอียงไม่สำเร็จ");
+    return createCloseupMockupPreview(rawSrc, size);
+  }
+
+  function captureCurrentMockup(size = 1600) {
+    const canvas = mainMockupStageRef.current?.querySelector("canvas");
+    if (!canvas || canvas.width < 2 || canvas.height < 2) {
+      throw new Error("ตัวอย่าง Mockup ยังไม่พร้อม กรุณารอสักครู่แล้วลองอีกครั้ง");
+    }
+
+    const out = document.createElement("canvas");
+    out.width = size;
+    out.height = size;
+    const ctx = out.getContext("2d");
+    if (!ctx) throw new Error("สร้างภาพ Mockup ไม่สำเร็จ");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size, size);
+    const scale = Math.min(size / canvas.width, size / canvas.height);
+    const w = canvas.width * scale;
+    const h = canvas.height * scale;
+    ctx.drawImage(canvas, (size - w) / 2, (size - h) / 2, w, h);
+    return out.toDataURL("image/png");
+  }
+
+  async function prepareInquiryFiles() {
+    const validationError = validateShareOrder();
+    if (validationError) {
+      setOrderError(validationError);
+      return;
+    }
+
+    const render = productionRenderRef.current;
+    if (!render) {
+      setOrderError("โมเดลไฟล์ผลิตยังไม่พร้อม กรุณารอสักครู่แล้วลองอีกครั้ง");
+      return;
+    }
+
+    setInquiryFileBusy(true);
+    setOrderError("");
+    setMessengerPackageStatus("กำลังสร้าง PDF + Production PNG + ภาพ Mockup...");
+
+    try {
+      const fileId = inquiryOrderId || createOrderId();
+      if (!inquiryOrderId) setInquiryOrderId(fileId);
+
+      // ใช้ภาพมุมเอียงแบบเดียวกับ Realtime Preview และซูมสินค้าให้ใหญ่ชัดใน PDF
+      // ไม่แก้ Plug3D.tsx — ใช้ preset "angle" ที่มีอยู่แล้ว แล้ว crop/ขยายหลัง Render
+      const mockupSrc = await renderInquiryAngleCloseup(1600);
+      setInquiryMockupPreview(mockupSrc);
+
+      const productionFileName = `${fileId}-${selectedPlugId}-production.png`;
+      const mockupFileName = `${fileId}-${selectedPlugId}-mockup.png`;
+      const pdfFileName = `${fileId}-${selectedPlugId}-summary.pdf`;
+
+      // เส้นทาง “สอบถาม” ใช้ Production Preview 1600×1600 ที่สร้างไว้แบบเรียลไทม์
+      // เพื่อไม่ให้ปุ่มนี้ต้อง Render 3000×3000 ซ้ำและเสี่ยง timeout; เส้นทางสั่งผลิตเดิมยังใช้ไฟล์ High-res ของมันตามเดิม
+      const productionSrc = productionOrderPreview || (await renderWithTimeout(
+        render({
+          transparent: true,
+          view: "top",
+          download: false,
+          width: 1600,
+          height: 1600,
+          filename: productionFileName,
+        }),
+        35_000,
+        "สร้างไฟล์ผลิตสำหรับสอบถามใช้เวลานานเกิน 35 วินาที กรุณาลองอีกครั้ง"
+      ));
+
+      if (!productionSrc) throw new Error("สร้างไฟล์ผลิตไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+      setProductionOrderPreview(productionSrc);
+
+      // คำนวณชื่อสีภายในฟังก์ชันนี้โดยตรง เพราะ topLabel / bottomLabel / switchLabel
+      // ที่ใช้แสดงผลหน้า Order อยู่ใน render scope และเรียกจากตรงนี้ไม่ได้
+      const inquiryTopLabel = getColorLabel(
+        safeColors.top ?? customization.topColor,
+        currentColorOptions.top
+      );
+      const inquiryBottomLabel = getColorLabel(
+        safeColors.bottom ?? customization.bottomColor,
+        currentColorOptions.bottom
+      );
+      const inquirySwitchLabel = showQuickSwitch
+        ? getColorLabel(
+            safeColors.switch ?? customization.switchColor,
+            currentColorOptions.switch ?? currentColorOptions.top
+          )
+        : undefined;
+
+      const pdfBlob = await createMessengerPdfBlob({
+        orderId: fileId,
+        modelName: plug.name ?? selectedPlugId,
+        modelId: selectedPlugId,
+        quantity: parsedOrderQuantity,
+        unitPrice: formatPrice(pricing.unitPrice),
+        totalPrice: formatPrice(pricing.totalPrice),
+        priceRange: `${pricing.minQty}-${pricing.maxQty} ชิ้น`,
+        topColor: inquiryTopLabel,
+        bottomColor: inquiryBottomLabel,
+        switchColor: inquirySwitchLabel,
+        patternText: hasPattern ? `มีลาย • Zoom ${patternTransform.zoom.toFixed(2)} • ${rotationDeg}°` : "ไม่มีลาย",
+        logoText: logoCount ? `${logoCount} จุด` : "ไม่มีโลโก้",
+        topRightSrc: mockupSrc,
+        productionSrc,
+      });
+
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      setMessengerPackageFiles((prev) => {
+        if (prev?.pdfUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.pdfUrl);
+        return {
+          orderId: fileId,
+          pdfUrl,
+          pdfFileName,
+          productionUrl: productionSrc,
+          productionFileName,
+          topRightUrl: mockupSrc,
+          topRightFileName: mockupFileName,
+        };
+      });
+      // One-click inquiry download: PDF + Production PNG เท่านั้น
+      // ภาพ Mockup ยังคงถูกฝังอยู่ใน PDF แต่ไม่ดาวน์โหลดเป็นไฟล์แยกแล้ว
+      downloadBlob(pdfBlob, pdfFileName);
+      downloadDataUrl(productionSrc, productionFileName);
+      setInquiryPdfDownloaded(true);
+      setInquiryProductionDownloaded(true);
+      setInquiryMockupDownloaded(false);
+      setMessengerPackageStatus("ดาวน์โหลด PDF + Production PNG แล้ว ✓");
+    } catch (error) {
+      setOrderError(error instanceof Error ? error.message : "เตรียมไฟล์สำหรับสอบถามไม่สำเร็จ");
+      setMessengerPackageStatus("");
+    } finally {
+      setInquiryFileBusy(false);
+    }
+  }
+
+  function downloadInquiryPdf() {
+    if (!messengerPackageFiles) return;
+    const link = document.createElement("a");
+    link.href = messengerPackageFiles.pdfUrl;
+    link.download = messengerPackageFiles.pdfFileName;
+    link.click();
+    setInquiryPdfDownloaded(true);
+  }
+
+  function downloadInquiryProductionFile() {
+    if (!messengerPackageFiles) return;
+    downloadDataUrl(messengerPackageFiles.productionUrl, messengerPackageFiles.productionFileName);
+    setInquiryProductionDownloaded(true);
+  }
+
+  function downloadInquiryMockupImage() {
+    if (!messengerPackageFiles) return;
+    downloadDataUrl(messengerPackageFiles.topRightUrl, messengerPackageFiles.topRightFileName);
+    setInquiryMockupDownloaded(true);
+  }
+
+  function openInquiryMessenger() {
+    const url = MESSENGER_DESKTOP_FALLBACK_URL;
+    const popup = window.open(url, "_blank");
+    if (popup) popup.opener = null;
+    setMessengerPackageStatus(
+      popup
+        ? "เปิด Facebook / Messenger แล้ว ✓ • วางข้อความและแนบไฟล์ทั้ง 3 (PDF + PNG 2 ไฟล์)"
+        : "Browser บล็อกหน้าต่าง Facebook กรุณาอนุญาต Pop-up แล้วลองอีกครั้ง"
+    );
+  }
+
+  function openInquiryLine() {
+    const url = "https://line.me/R/ti/p/%40adsawinplug";
+    const popup = window.open(url, "_blank");
+    if (popup) popup.opener = null;
+    setMessengerPackageStatus(
+      popup
+        ? "เปิด LINE @adsawinplug แล้ว ✓ • ถ้ายังไม่ได้เพิ่มเพื่อนให้ Add ก่อน จากนั้นวางข้อความและแนบไฟล์ทั้ง 3 (PDF + PNG 2 ไฟล์)"
+        : "Browser บล็อกหน้าต่าง LINE กรุณาอนุญาต Pop-up แล้วลองอีกครั้ง"
+    );
   }
 
   function validateDirectOrderForm() {
@@ -2855,20 +3159,22 @@ export default function PlugCustomizer({ plugId }: Props) {
     );
   }
 
-  function renderViewButtonSelector(extraClass = "") {
+  function renderViewButtonSelector(extraClass = "", hideHeader = false) {
     return (
       <div
         className={`viewUnderPreview ${extraClass}`.trim()}
         aria-label="ปุ่มเลือกมุมมอง"
       >
-        <div className="viewUnderPreviewHead">
-          <div>
-            <div className="viewUnderTitle">มุมมอง</div>
+        {!hideHeader && (
+          <div className="viewUnderPreviewHead">
+            <div>
+              <div className="viewUnderTitle">มุมมอง</div>
+            </div>
+            <span className="viewUnderCurrent">
+              {VIEW_BUTTONS.find((item) => item.key === customization.view)?.label ?? "มุมปัจจุบัน"}
+            </span>
           </div>
-          <span className="viewUnderCurrent">
-            {VIEW_BUTTONS.find((item) => item.key === customization.view)?.label ?? "มุมปัจจุบัน"}
-          </span>
-        </div>
+        )}
 
         <div className="viewUnderGrid">
           {VIEW_BUTTONS.map((item) => {
@@ -3281,23 +3587,40 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="orderFlowIntro">
             <div>
               <div className="label">ขั้นตอนสุดท้ายหลัง Mockup เสร็จ</div>
-              <div className="hint">เลือกจำนวน → คำนวณราคา → เลือกว่าจะสั่งผลิตเลยหรือแชร์รายละเอียดไปยัง Messenger / LINE / แอปที่ต้องการ</div>
+              <div className="hint">เลือกจำนวน → ระบบคำนวณราคา → ดาวน์โหลดเอกสารและส่งรายละเอียดเพื่อสอบถามได้ทันที</div>
             </div>
             <span className={`orderReadyBadge ${productionReady ? "ready" : "waiting"}`}>
               {productionReady ? "Production พร้อม" : "กำลังรอ Production"}
             </span>
           </div>
 
-          <div className="orderPreviewCard">
-            <div className="orderPreviewTitle">Mockup / Production Preview</div>
-            <div className="orderPreviewStage">
-              {productionOrderPreview ? (
-                <img src={productionOrderPreview} alt="Production preview" className="orderPreviewImage" />
-              ) : (
-                <div className="orderPreviewEmpty">
-                  {productionOrderPreviewLoading ? "กำลังสร้างตัวอย่างไฟล์ผลิต..." : "ยังไม่มีตัวอย่างไฟล์ผลิต"}
+          <div className="orderPreviewCard realtimePreviewCard">
+            <div className="orderPreviewTitle">ตัวอย่างเรียลไทม์</div>
+            <div className="realtimePreviewGrid">
+              <div className="realtimePreviewItem">
+                <strong>Mockup มุมเอียง (Close-up)</strong>
+                <div className="orderPreviewStage">
+                  {inquiryMockupPreview ? (
+                    <img src={inquiryMockupPreview} alt="Mockup realtime preview" className="orderPreviewImage" />
+                  ) : (
+                    <div className="orderPreviewEmpty">กำลังอ่านภาพ Mockup...</div>
+                  )}
                 </div>
-              )}
+                <small>มุมเอียง 3/4 แบบซูมใกล้ • อัปเดตอัตโนมัติเมื่อสี ลาย หรือโลโก้เปลี่ยน</small>
+              </div>
+              <div className="realtimePreviewItem">
+                <strong>Production Preview</strong>
+                <div className="orderPreviewStage">
+                  {productionOrderPreview ? (
+                    <img src={productionOrderPreview} alt="Production preview" className="orderPreviewImage" />
+                  ) : (
+                    <div className="orderPreviewEmpty">
+                      {productionOrderPreviewLoading ? "กำลังสร้างตัวอย่างไฟล์ผลิต..." : "กำลังรอ Production..."}
+                    </div>
+                  )}
+                </div>
+                <small>อัปเดตอัตโนมัติเมื่อสี ลาย หรือโลโก้เปลี่ยน</small>
+              </div>
             </div>
             <div className="orderPreviewActions">
               <button
@@ -3306,7 +3629,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                 onClick={() => void refreshProductionOrderPreview()}
                 disabled={productionOrderPreviewLoading}
               >
-                {productionOrderPreviewLoading ? "กำลังสร้าง..." : "รีเฟรชตัวอย่างไฟล์ผลิต"}
+                {productionOrderPreviewLoading ? "กำลังสร้าง..." : "รีเฟรช Production Preview"}
               </button>
             </div>
           </div>
@@ -3337,7 +3660,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                   inputMode="numeric"
                 />
               </label>
-              <div className="orderMiniHint">จำนวนนี้จะถูกใช้ทั้งในระบบคำนวณราคา, Messenger และคำสั่งผลิต</div>
+              <div className="orderMiniHint">จำนวนนี้จะถูกใช้ทั้งในระบบคำนวณราคา ข้อความสอบถาม และคำสั่งผลิต</div>
             </div>
           </div>
 
@@ -3354,68 +3677,74 @@ export default function PlugCustomizer({ plugId }: Props) {
             </div>
           </div>
 
-          <div className="orderFlowCard">
-            <div className="orderFlowStepTitle">3) ต้องการทำต่อ?</div>
-            <div className="branchGrid">
-              <button
-                type="button"
-                className={`branchCard ${continuationChoice === "order" ? "active" : ""}`}
-                onClick={() => setContinuationChoice("order")}
-              >
-                <strong>สั่งผลิตเลย</strong>
-                <span>กรอกข้อมูล → ชำระเงิน → ยืนยันสั่งผลิต</span>
-              </button>
-              <button
-                type="button"
-                className={`branchCard ${continuationChoice === "messenger" ? "active" : ""}`}
-                onClick={() => setContinuationChoice("messenger")}
-              >
-                <strong>แชร์รายละเอียด</strong>
-                <span>เปิดเมนู Share ของเครื่อง แล้วเลือก Messenger / LINE / แอปที่ต้องการ</span>
-              </button>
-            </div>
+          <div className="orderFlowCard inquiryAutoIntro">
+            <div className="orderFlowStepTitle">3) รายละเอียดสำหรับส่งสอบถาม</div>
+            <div className="hint">ไม่ต้องเลือกขั้นตอนต่อ ระบบเตรียมข้อมูลสำหรับสอบถามให้ทันทีด้านล่าง</div>
           </div>
 
           {continuationChoice === "messenger" && (
-            <div className="orderFlowCard messengerFlowCard">
-              <div className="orderFlowStepTitle">แชร์รายละเอียดการสั่งผลิต</div>
-              <div className="messengerSummaryBox">
-                <div className="messengerSummaryTitle">ข้อมูลที่จะแชร์</div>
-                <pre className="messengerSummaryText">{messengerSummaryText}</pre>
+            <div className="orderFlowCard messengerFlowCard inquiryWizardCard">
+              <div className="inquiryWizardHead">
+                <div>
+                  <div className="orderFlowStepTitle" style={{ marginBottom: 4 }}>เอกสารสำหรับส่งสอบถาม</div>
+                  <div className="hint">ตรวจรายละเอียดด้านล่าง แล้วกดปุ่มเดียวเพื่อดาวน์โหลด PDF + Production PNG</div>
+                </div>
+                <span className="inquiryIdBadge">{inquiryOrderId || "กำลังเตรียมรหัส..."}</span>
               </div>
-              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                <button type="button" className="btn btnGhost" onClick={() => void copyMessengerSummary()}>
-                  {messengerCopied ? "คัดลอกแล้ว ✓" : "คัดลอกข้อความ"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btnPrimary"
-                  disabled={
-                    messengerPackageBusy ||
-                    !pricing.pricingReady
-                  }
-                  onClick={() => void createMessengerPackageAndOpen()}
-                >
-                  {messengerPackageBusy ? "กำลังเปิดเมนูแชร์..." : "แชร์รายละเอียด"}
-                </button>
+
+              <div className="inquiryMiniSummary">
+                <div><span>Mockup</span><strong>{plug.name ?? selectedPlugId}</strong></div>
+                <div><span>รุ่น</span><strong>{selectedPlugId}</strong></div>
+                <div><span>จำนวน</span><strong>{parsedOrderQuantity || 0} ชิ้น</strong></div>
+                <div><span>ราคา/ชิ้น</span><strong>{pricing.pricingReady ? formatPrice(pricing.unitPrice) : "-"}</strong></div>
+                <div className="wide"><span>ราคารวม</span><strong>{pricing.pricingReady ? formatPrice(pricing.totalPrice) : pricing.message}</strong></div>
               </div>
+
+              <div className="inquiryCallout">
+                <strong>ไฟล์ที่ได้</strong><br />
+                1) PDF สรุปข้อมูล + ราคา + รูป Mockup + รูป Production<br />
+                2) Production PNG สำหรับส่งตรวจแบบ/ใช้ผลิต
+              </div>
+
+              <button
+                type="button"
+                className="btn btnPrimary"
+                disabled={inquiryFileBusy || !productionReady || !pricing.pricingReady}
+                onClick={() => void prepareInquiryFiles()}
+                style={{ width: "100%", minHeight: 52, fontSize: 16, fontWeight: 800 }}
+              >
+                {inquiryFileBusy ? "กำลังสร้าง PDF + Production PNG..." : "⬇ ดาวน์โหลด PDF + Production PNG"}
+              </button>
 
               <div className="hint" style={{ marginTop: 8 }}>
-                กด <strong>“แชร์รายละเอียด”</strong> แล้วเลือก Messenger, LINE หรือแอปที่ต้องการจากเมนู Share ของเครื่อง • รอบนี้แชร์เฉพาะข้อความ Order
+                Browser บางเครื่องอาจถามอนุญาตดาวน์โหลดหลายไฟล์ในครั้งแรก ให้กด Allow / อนุญาต
               </div>
 
-              {messengerPackageStatus && (
-                <div className="messengerPackageStatus">{messengerPackageStatus}</div>
+              {messengerPackageStatus && <div className="messengerPackageStatus">{messengerPackageStatus}</div>}
+
+              {(inquiryPdfDownloaded && inquiryProductionDownloaded) && (
+                <div className="inquiryReadyBox" style={{ marginTop: 12 }}>
+                  <strong>✓ เอกสารพร้อมแล้ว</strong>
+                  <div className="inquiryChecklist">
+                    <span className="ok">✓ PDF สรุปข้อมูลดาวน์โหลดแล้ว</span>
+                    <span className="ok">✓ Production PNG ดาวน์โหลดแล้ว</span>
+                  </div>
+                </div>
               )}
 
-              <div className="hint" style={{ marginTop: 8 }}>
-                <strong>ยังไม่ส่งรูปหรือ PDF</strong> • หาก Browser บน PC ไม่รองรับ Web Share ระบบจะคัดลอกข้อความและเปิด Facebook Messages ให้เป็นทางสำรอง
+              <div className="messengerSummaryBox" style={{ marginTop: 12 }}>
+                <div className="messengerSummaryTitle">ข้อความสั้นสำหรับวางในแชต</div>
+                <pre className="messengerSummaryText">{inquirySummaryText}</pre>
               </div>
-              <button type="button" className="btn btnGhost" style={{ marginTop: 8 }} onClick={openFacebookSessionFallback}>
-                เปิด Facebook Messages (สำรอง)
-              </button>
-              <div className="hint" style={{ marginTop: 6 }}>
-                ใช้ปุ่มนี้เมื่อเมนู Share ไม่มี Messenger หรือ Browser ไม่รองรับการแชร์โดยตรง
+
+              <div className="inquiryChatButtons">
+                <button type="button" className="btn btnGhost" onClick={() => void copyMessengerSummary(inquirySummaryText)}>📋 คัดลอกข้อความ</button>
+                <button type="button" className="btn btnPrimary" onClick={openInquiryLine}>LINE @adsawinplug</button>
+                <button type="button" className="btn btnPrimary" onClick={openInquiryMessenger}>Facebook / Messenger</button>
+              </div>
+
+              <div className="hint" style={{ marginTop: 8 }}>
+                เปิดแชต → วางข้อความ → แนบ PDF และ Production PNG → ส่งสอบถามได้เลย
               </div>
             </div>
           )}
@@ -3723,7 +4052,7 @@ export default function PlugCustomizer({ plugId }: Props) {
             </div>
 
             <div className="body" style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-              <div className="mock mockWithOverlay">
+              <div className="mock mockWithOverlay" ref={mainMockupStageRef}>
                 <Plug3D
                   key={plugConfig.modelPath}
                   config={plugConfig}
@@ -3829,7 +4158,39 @@ export default function PlugCustomizer({ plugId }: Props) {
                 )}
               </div>
 
-              {/* ✅ จอใหญ่ยังโชว์ปุ่มมุมมองใต้ภาพ 3D / จอเล็กให้ปุ่มเด้งไปต่อท้าย Accordion หมวด 5) มุมมอง */}
+              {/* มือถือ: เมนูมุมมองอยู่ใต้จอ 3D และพับ/เปิดได้ */}
+              {isMobileLayout && (
+                <div className={`mobileViewDock ${mobileViewDockOpen ? "open" : ""}`}>
+                  <button
+                    type="button"
+                    className="mobileViewDockToggle"
+                    onClick={() => setMobileViewDockOpen((open) => !open)}
+                    aria-expanded={mobileViewDockOpen}
+                    aria-controls="mobile-view-dock-panel"
+                  >
+                    <span className="mobileViewDockText">
+                      <strong>มุมมอง</strong>
+                      <small>
+                        {VIEW_BUTTONS.find((item) => item.key === customization.view)?.label ?? "มุมปัจจุบัน"}
+                      </small>
+                    </span>
+                    <span className="stepChevron" aria-hidden="true">
+                      {mobileViewDockOpen ? "⌃" : "⌄"}
+                    </span>
+                  </button>
+
+                  <div
+                    id="mobile-view-dock-panel"
+                    className={`mobileViewDockPanel ${mobileViewDockOpen ? "open" : "closed"}`}
+                  >
+                    <div className="mobileViewDockPanelInner">
+                      {renderViewButtonSelector("mobileViewDockSelector", true)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Desktop: คงเมนูมุมมองใต้ภาพ 3D แบบเดิม */}
               {!isMobileLayout && renderViewButtonSelector()}
 
               <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
@@ -3979,12 +4340,6 @@ export default function PlugCustomizer({ plugId }: Props) {
                           </span>
                         )}
                       </button>
-
-                      {isMobileLayout && s.id === "view" && (
-                        <div className="mobileViewAppendSlot">
-                          {renderViewButtonSelector("mobileViewAccordionSelector")}
-                        </div>
-                      )}
 
                       {isMobileLayout && active && (
                         <div
@@ -4658,6 +5013,10 @@ const CSS = `
   min-width:88px;
 }
 
+.mobileViewDock{
+  display:none;
+}
+
 .viewUnderPreview{
   /* ✅ ขยับแถบปุ่มมุมมองใต้ภาพ 3D ให้ขึ้นใกล้กรอบพรีวิวมากขึ้น */
   margin-top:2px;
@@ -4988,6 +5347,269 @@ const CSS = `
   text-decoration:none;
   justify-content:center;
   text-align:center;
+}
+
+.realtimePreviewGrid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.realtimePreviewItem{
+  min-width:0;
+}
+.realtimePreviewItem>strong{
+  display:block;
+  margin-bottom:7px;
+}
+.realtimePreviewItem>small{
+  display:block;
+  margin-top:7px;
+  color:#64748b;
+  line-height:1.5;
+}
+.inquiryFileGridThree{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+}
+@media (max-width: 980px){
+  .realtimePreviewGrid,
+  .inquiryFileGridThree{grid-template-columns:1fr;}
+}
+
+.inquiryWizardCard{
+  background:#f8fafc;
+}
+.inquiryWizardHead{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.inquiryIdBadge{
+  display:inline-flex;
+  align-items:center;
+  min-height:28px;
+  padding:5px 9px;
+  border-radius:999px;
+  background:#e0f2fe;
+  border:1px solid #bae6fd;
+  color:#075985;
+  font-size:11px;
+  font-weight:800;
+  white-space:nowrap;
+}
+.inquiryProgress{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  margin:14px 0;
+}
+.inquiryProgressItem{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:8px;
+  border-radius:12px;
+  border:1px solid #e2e8f0;
+  background:#fff;
+  color:#64748b;
+}
+.inquiryProgressItem span{
+  flex:0 0 auto;
+  width:24px;
+  height:24px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  background:#e2e8f0;
+  color:#475569;
+  font-size:11px;
+  font-weight:900;
+}
+.inquiryProgressItem small{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:11px;
+  font-weight:800;
+}
+.inquiryProgressItem.active{
+  border-color:#93c5fd;
+  background:#eff6ff;
+  color:#1d4ed8;
+}
+.inquiryProgressItem.active span{
+  background:#2563eb;
+  color:#fff;
+}
+.inquiryProgressItem.done{
+  border-color:#bbf7d0;
+  background:#f0fdf4;
+  color:#166534;
+}
+.inquiryProgressItem.done span{
+  background:#16a34a;
+  color:#fff;
+}
+.inquiryStepPanel{
+  padding-top:2px;
+}
+.inquiryStepTitle{
+  margin-bottom:10px;
+  font-size:15px;
+  font-weight:900;
+  color:#0f172a;
+}
+.inquiryMiniSummary{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.inquiryMiniSummary > div{
+  padding:10px 11px;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  background:#fff;
+}
+.inquiryMiniSummary > div.wide{
+  grid-column:1 / -1;
+}
+.inquiryMiniSummary span,
+.inquiryMiniSummary strong{
+  display:block;
+}
+.inquiryMiniSummary span{
+  color:#64748b;
+  font-size:11px;
+  font-weight:700;
+}
+.inquiryMiniSummary strong{
+  margin-top:3px;
+  color:#0f172a;
+  font-size:14px;
+}
+.inquiryCallout{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:#fff7ed;
+  border:1px solid #fed7aa;
+  color:#9a3412;
+  font-size:12px;
+  line-height:1.55;
+}
+.inquiryNavRow{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:12px;
+}
+.inquiryNavRow.split{
+  justify-content:space-between;
+}
+.inquiryFileGrid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.inquiryFileCard{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-width:0;
+  padding:12px;
+  border:1px solid #e2e8f0;
+  border-radius:14px;
+  background:#fff;
+}
+.inquiryFileCard.done{
+  border-color:#86efac;
+  background:#f0fdf4;
+}
+.inquiryFileCard strong{
+  color:#0f172a;
+  font-size:14px;
+}
+.inquiryFileCard small{
+  min-height:34px;
+  color:#64748b;
+  font-size:11px;
+  line-height:1.5;
+}
+.inquiryFileCard img,
+.inquiryFilePlaceholder{
+  width:100%;
+  height:150px;
+  object-fit:contain;
+  border:1px solid #e2e8f0;
+  border-radius:10px;
+  background:#f8fafc;
+}
+.inquiryFilePlaceholder{
+  display:grid;
+  place-items:center;
+  padding:12px;
+  box-sizing:border-box;
+  text-align:center;
+  color:#94a3b8;
+  font-size:11px;
+}
+.inquiryFileStatus{
+  align-self:flex-start;
+  padding:4px 8px;
+  border-radius:999px;
+  background:#f1f5f9;
+  color:#475569;
+  font-size:10px;
+  font-weight:900;
+}
+.inquiryFileCard.done .inquiryFileStatus{
+  background:#dcfce7;
+  color:#166534;
+}
+.inquiryReadyBox{
+  padding:13px;
+  border-radius:14px;
+  border:1px solid #86efac;
+  background:#f0fdf4;
+}
+.inquiryReadyBox > strong{
+  color:#166534;
+  font-size:14px;
+}
+.inquiryChecklist{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-top:9px;
+}
+.inquiryChecklist span{
+  color:#64748b;
+  font-size:12px;
+  font-weight:700;
+}
+.inquiryChecklist span.ok{
+  color:#166534;
+}
+.inquiryChatGuide{
+  margin-top:10px;
+  padding:12px;
+  border-radius:14px;
+  border:1px solid #dbeafe;
+  background:#eff6ff;
+  color:#1e3a8a;
+  font-size:12px;
+  line-height:1.6;
+}
+.inquiryChatGuide ol{
+  margin:7px 0 0 18px;
+  padding:0;
+}
+.inquiryChatButtons{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
 }
 
 .directOrderFlow{
@@ -5574,6 +6196,24 @@ input[type="range"]{
   .orderQuantityRow{
     grid-template-columns:1fr;
   }
+  .inquiryWizardHead{
+    flex-direction:column;
+  }
+  .inquiryProgress{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .inquiryMiniSummary{
+    grid-template-columns:1fr;
+  }
+  .inquiryMiniSummary > div.wide{
+    grid-column:auto;
+  }
+  .inquiryNavRow.split{
+    flex-direction:column-reverse;
+  }
+  .inquiryNavRow.split .btn{
+    width:100%;
+  }
   .orderPreviewStage{
     min-height:180px;
   }
@@ -5710,16 +6350,83 @@ input[type="range"]{
   }
 
 
-
-  .mobileViewAppendSlot{
-    margin:8px 0 4px;
-    padding:0 2px;
+  .mobileViewDock{
+    display:block;
+    margin-top:8px;
+    border-radius:18px;
+    background:rgba(255,255,255,.88);
+    border:1px solid rgba(226,232,240,.92);
+    box-shadow:0 10px 22px rgba(15,23,42,.08);
+    overflow:hidden;
   }
 
-  .mobileViewAccordionSelector{
-    margin-top: 8px;
-    margin-bottom: 12px;
-    border-radius: 18px;
+  .mobileViewDockToggle{
+    width:100%;
+    min-height:50px;
+    padding:9px 11px;
+    border:0;
+    background:transparent;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    color:#0f172a;
+    cursor:pointer;
+    text-align:left;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  .mobileViewDockText{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+
+  .mobileViewDockText strong{
+    font-size:13px;
+    font-weight:950;
+    color:#334155;
+  }
+
+  .mobileViewDockText small{
+    font-size:11px;
+    font-weight:800;
+    color:#6366f1;
+  }
+
+  .mobileViewDockPanel{
+    display:block;
+    overflow:hidden;
+    transition:max-height .24s ease, opacity .18s ease, transform .18s ease;
+  }
+
+  .mobileViewDockPanel.open{
+    max-height:420px;
+    opacity:1;
+    transform:translateY(0);
+  }
+
+  .mobileViewDockPanel.closed{
+    max-height:0;
+    opacity:0;
+    transform:translateY(-4px);
+    pointer-events:none;
+  }
+
+  .mobileViewDockPanelInner{
+    padding:0 8px 9px;
+  }
+
+  .mobileViewDockSelector{
+    margin:0;
+    padding:0;
+    border:0;
+    border-radius:0;
+    background:transparent;
+    box-shadow:none;
+    backdrop-filter:none;
+    -webkit-backdrop-filter:none;
   }
 
   .mobileStepPanelInner::-webkit-scrollbar{
@@ -5779,22 +6486,24 @@ input[type="range"]{
   }
 
   .productionPreviewInset{
-    top:8px;
-    right:8px;
-    width:108px;
-    border-radius:14px;
+    top:7px;
+    right:7px;
+    width:82px;
+    border-radius:11px;
+    box-shadow:0 8px 20px rgba(15,23,42,.16);
   }
 
   .productionPreviewHead{
-    height:24px;
-    flex-basis:24px;
-    padding:0 7px;
-    font-size:9px;
+    height:20px;
+    flex-basis:20px;
+    padding:0 5px;
+    font-size:8px;
   }
 
   .productionPreviewDot{
-    width:6px;
-    height:6px;
+    width:5px;
+    height:5px;
+    box-shadow:0 0 0 2px rgba(34,197,94,.14);
   }
 
   .mobileOrbitBar{
