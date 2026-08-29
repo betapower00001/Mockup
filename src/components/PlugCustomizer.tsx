@@ -1485,6 +1485,72 @@ function createImageOnlyPdf(pages: { jpeg: Uint8Array; width: number; height: nu
   return new Blob([concatByteArrays(chunks)], { type: "application/pdf" });
 }
 
+async function createMessengerSummaryImageDataUrl(input: MessengerPdfInput) {
+  const topRightImage = await loadDataUrlImage(input.topRightSrc);
+
+  // ใช้ขนาดเดียวกับหน้าแรกของ PDF เดิม เพื่อให้หน้าตา/สัดส่วนเหมือนภาพที่ลูกค้าเห็น
+  const width = 1240;
+  const height = 1754;
+  const margin = 78;
+
+  const page = document.createElement("canvas");
+  page.width = width;
+  page.height = height;
+  const ctx = page.getContext("2d");
+  if (!ctx) throw new Error("สร้างภาพสรุป Mockup ไม่สำเร็จ");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "700 46px Arial, Tahoma, sans-serif";
+  ctx.fillText("ADS AWIN PLUG - MOCKUP ORDER", margin, 92);
+  ctx.font = "700 30px Arial, Tahoma, sans-serif";
+  ctx.fillText(`Order ID: ${input.orderId}`, margin, 144);
+
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(margin, 184, width - margin * 2, 365);
+  ctx.strokeStyle = "#e2e8f0";
+  ctx.strokeRect(margin, 184, width - margin * 2, 365);
+
+  const rows = [
+    ["รุ่นสินค้า", `${input.modelName} (${input.modelId})`],
+    ["จำนวน", `${input.quantity.toLocaleString("th-TH")} ชิ้น`],
+    ["ช่วงราคา", input.priceRange],
+    ["ราคาต่อชิ้น", input.unitPrice],
+    ["ราคารวม", input.totalPrice],
+    [
+      "สี",
+      `บน ${input.topColor} / ล่าง ${input.bottomColor}${
+        input.switchColor ? ` / สวิตช์ ${input.switchColor}` : ""
+      }`,
+    ],
+    ["ลวดลาย / โลโก้", `${input.patternText} / ${input.logoText}`],
+  ];
+
+  rows.forEach(([label, value], index) => {
+    const y = 226 + index * 46;
+    ctx.fillStyle = "#64748b";
+    ctx.font = "700 23px Arial, Tahoma, sans-serif";
+    ctx.fillText(label, margin + 28, y);
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "600 23px Arial, Tahoma, sans-serif";
+    ctx.fillText(value, margin + 280, y);
+  });
+
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "700 30px Arial, Tahoma, sans-serif";
+  ctx.fillText("MOCKUP PREVIEW", margin, 612);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(margin, 644, width - margin * 2, 900);
+  drawImageContain(ctx, topRightImage, margin + 20, 664, width - margin * 2 - 40, 860);
+
+  ctx.fillStyle = "#64748b";
+  ctx.font = "500 20px Arial, Tahoma, sans-serif";
+  ctx.fillText("Mockup preview captured from the current 3D view", margin, height - 72);
+
+  return page.toDataURL("image/png");
+}
+
 async function createMessengerPdfBlob(input: MessengerPdfInput) {
   const [topRightImage, productionImage] = await Promise.all([
     loadDataUrlImage(input.topRightSrc),
@@ -1927,6 +1993,18 @@ export default function PlugCustomizer({ plugId }: Props) {
 
   function buildInquirySummary() {
     const id = inquiryOrderId || messengerPackageFiles?.orderId || "";
+    const attachments = isMobileDownloadDevice
+      ? [
+          "แนบไฟล์ประกอบการสอบถาม 2 ไฟล์",
+          "1) ภาพสรุป Mockup (.png)",
+          "2) ไฟล์ส่งผลิต Production (.png)",
+        ]
+      : [
+          "แนบไฟล์ประกอบการสอบถาม 2 ไฟล์",
+          "1) PDF สรุปรายการพร้อมรูป",
+          "2) ไฟล์ผลิต (Production PNG)",
+        ];
+
     return [
       "สนใจสอบถามสั่งผลิตสินค้า",
       "",
@@ -1937,10 +2015,7 @@ export default function PlugCustomizer({ plugId }: Props) {
       `ราคารวม: ${pricing.pricingReady ? formatPrice(pricing.totalPrice) : pricing.message}`,
       id ? `Inquiry ID: ${id}` : "",
       "",
-      "แนบไฟล์ประกอบการสอบถาม 3 ไฟล์",
-      "1) PDF สรุปรายการพร้อมรูป",
-      "2) ไฟล์ผลิต (Production PNG)",
-      "3) ภาพ Mockup ตามมุมที่เห็นบนหน้าจอ",
+      ...attachments,
       "",
       "กรุณาตรวจสอบรายละเอียดและแจ้งกลับได้เลยค่ะ",
     ].filter(Boolean).join("\n");
@@ -2258,7 +2333,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     return out.toDataURL("image/png");
   }
 
-  async function prepareInquiryFiles(mobileDownloadTarget?: "pdf" | "production") {
+  async function prepareInquiryFiles(mobileDownloadTarget?: "summary" | "production") {
     const validationError = validateShareOrder();
     if (validationError) {
       setOrderError(validationError);
@@ -2273,41 +2348,45 @@ export default function PlugCustomizer({ plugId }: Props) {
 
     setInquiryFileBusy(true);
     setOrderError("");
-    setMessengerPackageStatus("กำลังสร้าง PDF + Production PNG + ภาพ Mockup...");
+    setMessengerPackageStatus(
+      isMobileDownloadDevice
+        ? "กำลังสร้างภาพสรุป Mockup + Production PNG..."
+        : "กำลังสร้าง PDF + Production PNG + ภาพ Mockup..."
+    );
 
     try {
       const fileId = inquiryOrderId || createOrderId();
       if (!inquiryOrderId) setInquiryOrderId(fileId);
 
-      // ใช้ภาพมุมเอียงแบบเดียวกับ Realtime Preview และซูมสินค้าให้ใหญ่ชัดใน PDF
-      // ไม่แก้ Plug3D.tsx — ใช้ preset "angle" ที่มีอยู่แล้ว แล้ว crop/ขยายหลัง Render
+      // ใช้ภาพมุมเอียงแบบเดียวกับ Realtime Preview
       const mockupSrc = await renderInquiryAngleCloseup(1600);
       setInquiryMockupPreview(mockupSrc);
 
       const productionFileName = `${fileId}-${selectedPlugId}-production.png`;
       const mockupFileName = `${fileId}-${selectedPlugId}-mockup.png`;
       const pdfFileName = `${fileId}-${selectedPlugId}-summary.pdf`;
+      const mobileSummaryFileName = `${fileId}-${selectedPlugId}-mockup-summary.png`;
 
-      // Desktop ใช้ realtime preview 1600×1600 เดิมได้เลย
-      // Mobile ใช้ preview realtime ที่เบากว่า จึงค่อย Render 1600×1600 เฉพาะตอนผู้ใช้กดดาวน์โหลดเอกสาร
-      const productionSrc = (!isMobileDownloadDevice && productionOrderPreview) || (await renderWithTimeout(
-        render({
-          transparent: true,
-          view: "top",
-          download: false,
-          width: 1600,
-          height: 1600,
-          filename: productionFileName,
-        }),
-        35_000,
-        "สร้างไฟล์ผลิตสำหรับสอบถามใช้เวลานานเกิน 35 วินาที กรุณาลองอีกครั้ง"
-      ));
+      // มือถือจะใช้ Production 1600×1600 สำหรับการส่งสอบถาม
+      // Desktop คงพฤติกรรมเดิม ใช้ realtime preview ถ้ามีอยู่แล้ว
+      const productionSrc =
+        (!isMobileDownloadDevice && productionOrderPreview) ||
+        (await renderWithTimeout(
+          render({
+            transparent: true,
+            view: "top",
+            download: false,
+            width: 1600,
+            height: 1600,
+            filename: productionFileName,
+          }),
+          35_000,
+          "สร้างไฟล์ผลิตสำหรับสอบถามใช้เวลานานเกิน 35 วินาที กรุณาลองอีกครั้ง"
+        ));
 
       if (!productionSrc) throw new Error("สร้างไฟล์ผลิตไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
       setProductionOrderPreview(productionSrc);
 
-      // คำนวณชื่อสีภายในฟังก์ชันนี้โดยตรง เพราะ topLabel / bottomLabel / switchLabel
-      // ที่ใช้แสดงผลหน้า Order อยู่ใน render scope และเรียกจากตรงนี้ไม่ได้
       const inquiryTopLabel = getColorLabel(
         safeColors.top ?? customization.topColor,
         currentColorOptions.top
@@ -2323,7 +2402,7 @@ export default function PlugCustomizer({ plugId }: Props) {
           )
         : undefined;
 
-      const pdfBlob = await createMessengerPdfBlob({
+      const documentInput: MessengerPdfInput = {
         orderId: fileId,
         modelName: plug.name ?? selectedPlugId,
         modelId: selectedPlugId,
@@ -2334,13 +2413,59 @@ export default function PlugCustomizer({ plugId }: Props) {
         topColor: inquiryTopLabel,
         bottomColor: inquiryBottomLabel,
         switchColor: inquirySwitchLabel,
-        patternText: hasPattern ? `มีลาย • Zoom ${patternTransform.zoom.toFixed(2)} • ${rotationDeg}°` : "ไม่มีลาย",
+        patternText: hasPattern
+          ? `มีลาย • Zoom ${patternTransform.zoom.toFixed(2)} • ${rotationDeg}°`
+          : "ไม่มีลาย",
         logoText: logoCount ? `${logoCount} จุด` : "ไม่มีโลโก้",
         topRightSrc: mockupSrc,
         productionSrc,
-      });
+      };
 
+      if (isMobileDownloadDevice) {
+        // MOBILE: ไม่สร้าง PDF — สร้างเฉพาะภาพหน้าแรก + Production PNG
+        const summaryImageSrc = await createMessengerSummaryImageDataUrl(documentInput);
+
+        setMessengerPackageFiles((prev) => {
+          if (prev?.pdfUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.pdfUrl);
+          return {
+            orderId: fileId,
+            // reuse field เดิมเพื่อลดผลกระทบส่วนอื่น แต่บนมือถือคือ PNG summary
+            pdfUrl: summaryImageSrc,
+            pdfFileName: mobileSummaryFileName,
+            productionUrl: productionSrc,
+            productionFileName,
+            topRightUrl: mockupSrc,
+            topRightFileName: mockupFileName,
+          };
+        });
+
+        setInquiryMockupDownloaded(false);
+
+        if (mobileDownloadTarget === "summary") {
+          downloadDataUrl(summaryImageSrc, mobileSummaryFileName);
+          setInquiryPdfDownloaded(true);
+          setMessengerPackageStatus(
+            "ดาวน์โหลดภาพสรุป Mockup แล้ว ✓ • ไฟล์ส่งผลิต PNG พร้อมให้ดาวน์โหลด"
+          );
+        } else if (mobileDownloadTarget === "production") {
+          downloadDataUrl(productionSrc, productionFileName);
+          setInquiryProductionDownloaded(true);
+          setMessengerPackageStatus(
+            "ดาวน์โหลดไฟล์ส่งผลิต PNG แล้ว ✓ • ภาพสรุป Mockup พร้อมให้ดาวน์โหลด"
+          );
+        } else {
+          setMessengerPackageStatus(
+            "สร้างภาพเรียบร้อยแล้ว ✓ กรุณาดาวน์โหลดภาพสรุป Mockup และไฟล์ส่งผลิต PNG"
+          );
+        }
+
+        return;
+      }
+
+      // DESKTOP: ระบบเดิม PDF + Production PNG
+      const pdfBlob = await createMessengerPdfBlob(documentInput);
       const pdfUrl = URL.createObjectURL(pdfBlob);
+
       setMessengerPackageFiles((prev) => {
         if (prev?.pdfUrl?.startsWith("blob:")) URL.revokeObjectURL(prev.pdfUrl);
         return {
@@ -2353,36 +2478,13 @@ export default function PlugCustomizer({ plugId }: Props) {
           topRightFileName: mockupFileName,
         };
       });
-      // Desktop: คงพฤติกรรมเดิม กดครั้งเดียวแล้วดาวน์โหลด PDF + Production PNG ต่อกัน
-      // Mobile: ห้ามสั่งดาวน์โหลด 2 ไฟล์อัตโนมัติจาก gesture เดียว เพราะ Safari/Chrome mobile
-      // อาจอนุญาตเพียงไฟล์แรก ให้เตรียมไฟล์ไว้แล้วแสดงปุ่มดาวน์โหลดแยกทีละไฟล์แทน
-      if (isMobileDownloadDevice) {
-        // Mobile มีปุ่มดาวน์โหลด 2 ปุ่มแยกตั้งแต่แรก
-        // เมื่อกดปุ่มใด ให้สร้าง package ครั้งเดียว แล้วดาวน์โหลดเฉพาะไฟล์ที่ผู้ใช้กด
-        setInquiryMockupDownloaded(false);
 
-        if (mobileDownloadTarget === "pdf") {
-          const link = document.createElement("a");
-          link.href = pdfUrl;
-          link.download = pdfFileName;
-          link.click();
-          setInquiryPdfDownloaded(true);
-          setMessengerPackageStatus("ดาวน์โหลด PDF แล้ว ✓ • Production PNG พร้อมให้กดดาวน์โหลดแยกได้ทันที");
-        } else if (mobileDownloadTarget === "production") {
-          downloadDataUrl(productionSrc, productionFileName);
-          setInquiryProductionDownloaded(true);
-          setMessengerPackageStatus("ดาวน์โหลด Production PNG แล้ว ✓ • PDF พร้อมให้กดดาวน์โหลดแยกได้ทันที");
-        } else {
-          setMessengerPackageStatus("ไฟล์พร้อมแล้ว ✓ กรุณาดาวน์โหลด PDF และ Production PNG ทีละไฟล์");
-        }
-      } else {
-        downloadBlob(pdfBlob, pdfFileName);
-        downloadDataUrl(productionSrc, productionFileName);
-        setInquiryPdfDownloaded(true);
-        setInquiryProductionDownloaded(true);
-        setInquiryMockupDownloaded(false);
-        setMessengerPackageStatus("ดาวน์โหลด PDF + Production PNG แล้ว ✓");
-      }
+      downloadBlob(pdfBlob, pdfFileName);
+      downloadDataUrl(productionSrc, productionFileName);
+      setInquiryPdfDownloaded(true);
+      setInquiryProductionDownloaded(true);
+      setInquiryMockupDownloaded(false);
+      setMessengerPackageStatus("ดาวน์โหลด PDF + Production PNG แล้ว ✓");
     } catch (error) {
       setOrderError(error instanceof Error ? error.message : "เตรียมไฟล์สำหรับสอบถามไม่สำเร็จ");
       setMessengerPackageStatus("");
@@ -2391,7 +2493,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     }
   }
 
-  function downloadInquiryPdf() {
+  function downloadInquirySummaryFile() {
     if (!messengerPackageFiles) return;
     const link = document.createElement("a");
     link.href = messengerPackageFiles.pdfUrl;
@@ -2406,12 +2508,12 @@ export default function PlugCustomizer({ plugId }: Props) {
     setInquiryProductionDownloaded(true);
   }
 
-  async function handleMobileInquiryPdfDownload() {
+  async function handleMobileInquirySummaryDownload() {
     if (messengerPackageFiles) {
-      downloadInquiryPdf();
+      downloadInquirySummaryFile();
       return;
     }
-    await prepareInquiryFiles("pdf");
+    await prepareInquiryFiles("summary");
   }
 
   async function handleMobileInquiryProductionDownload() {
@@ -3804,7 +3906,7 @@ export default function PlugCustomizer({ plugId }: Props) {
                   <div className="orderFlowStepTitle" style={{ marginBottom: 4 }}>เอกสารสำหรับส่งสอบถาม</div>
                   <div className="hint">
                     {isMobileDownloadDevice
-                      ? "บนมือถือมีปุ่มดาวน์โหลดแยก 2 ปุ่ม: PDF และ Production PNG"
+                      ? "บนมือถือดาวน์โหลดเป็นภาพ 2 ไฟล์: ภาพสรุป Mockup และไฟล์ส่งผลิต PNG"
                       : "ตรวจรายละเอียดด้านล่าง แล้วกดปุ่มเดียวเพื่อดาวน์โหลด PDF + Production PNG"}
                   </div>
                 </div>
@@ -3821,8 +3923,17 @@ export default function PlugCustomizer({ plugId }: Props) {
 
               <div className="inquiryCallout">
                 <strong>ไฟล์ที่ได้</strong><br />
-                1) PDF สรุปข้อมูล + ราคา + รูป Mockup + รูป Production<br />
-                2) Production PNG สำหรับส่งตรวจแบบ/ใช้ผลิต
+                {isMobileDownloadDevice ? (
+                  <>
+                    1) ภาพสรุปข้อมูล + ราคา + รูป Mockup (.png)<br />
+                    2) ไฟล์ส่งผลิต Production (.png)
+                  </>
+                ) : (
+                  <>
+                    1) PDF สรุปข้อมูล + ราคา + รูป Mockup + รูป Production<br />
+                    2) Production PNG สำหรับส่งตรวจแบบ/ใช้ผลิต
+                  </>
+                )}
               </div>
 
               {!isMobileDownloadDevice && (
@@ -3850,14 +3961,14 @@ export default function PlugCustomizer({ plugId }: Props) {
                     type="button"
                     className="btn btnPrimary"
                     disabled={inquiryFileBusy || !productionReady || !pricing.pricingReady}
-                    onClick={() => void handleMobileInquiryPdfDownload()}
+                    onClick={() => void handleMobileInquirySummaryDownload()}
                     style={{ width: "100%", minHeight: 52, fontSize: 15, fontWeight: 800 }}
                   >
                     {inquiryFileBusy && !messengerPackageFiles
                       ? "กำลังเตรียมไฟล์..."
                       : inquiryPdfDownloaded
-                        ? "✓ 1) ดาวน์โหลด PDF แล้ว — กดอีกครั้งได้"
-                        : "⬇ 1) ดาวน์โหลด PDF"}
+                        ? "✓ 1) ดาวน์โหลดภาพสรุปแล้ว — กดอีกครั้งได้"
+                        : "⬇ 1) ดาวน์โหลดภาพสรุป Mockup"}
                   </button>
 
                   <button
@@ -3871,14 +3982,14 @@ export default function PlugCustomizer({ plugId }: Props) {
                       ? "กำลังเตรียมไฟล์..."
                       : inquiryProductionDownloaded
                         ? "✓ 2) ดาวน์โหลด Production PNG แล้ว — กดอีกครั้งได้"
-                        : "⬇ 2) ดาวน์โหลด Production PNG"}
+                        : "⬇ 2) ดาวน์โหลดไฟล์ส่งผลิต PNG"}
                   </button>
                 </div>
               )}
 
               <div className="hint" style={{ marginTop: 8 }}>
                 {isMobileDownloadDevice
-                  ? "บนมือถือ แยกดาวน์โหลดทีละไฟล์เพื่อป้องกัน Safari/Chrome บล็อกไฟล์ที่สอง • กดไฟล์แรกครั้งเดียว ระบบจะเตรียมทั้งชุดไว้ให้ไฟล์ที่สองพร้อมโหลดทันที"
+                  ? "บนมือถือไม่มี PDF แล้ว • ดาวน์โหลดเป็น PNG ทั้ง 2 ไฟล์ และกดดาวน์โหลดทีละไฟล์"
                   : "Browser บางเครื่องอาจถามอนุญาตดาวน์โหลดหลายไฟล์ในครั้งแรก ให้กด Allow / อนุญาต"}
               </div>
 
@@ -3888,7 +3999,9 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <div className="inquiryReadyBox" style={{ marginTop: 12 }}>
                   <strong>✓ เอกสารพร้อมแล้ว</strong>
                   <div className="inquiryChecklist">
-                    <span className="ok">✓ PDF สรุปข้อมูลดาวน์โหลดแล้ว</span>
+                    <span className="ok">
+                      ✓ {isMobileDownloadDevice ? "ภาพสรุป Mockup" : "PDF สรุปข้อมูล"} ดาวน์โหลดแล้ว
+                    </span>
                     <span className="ok">✓ Production PNG ดาวน์โหลดแล้ว</span>
                   </div>
                 </div>
@@ -3906,7 +4019,9 @@ export default function PlugCustomizer({ plugId }: Props) {
               </div>
 
               <div className="hint" style={{ marginTop: 8 }}>
-                เปิดแชต → วางข้อความ → แนบ PDF และ Production PNG → ส่งสอบถามได้เลย
+                {isMobileDownloadDevice
+                  ? "เปิดแชต → วางข้อความ → แนบภาพสรุป Mockup และไฟล์ส่งผลิต PNG → ส่งสอบถามได้เลย"
+                  : "เปิดแชต → วางข้อความ → แนบ PDF และ Production PNG → ส่งสอบถามได้เลย"}
               </div>
             </div>
           )}
