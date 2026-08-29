@@ -1597,6 +1597,9 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [orbitNudgeTick, setOrbitNudgeTick] = useState(0);
   const [orbitNudgeDirection, setOrbitNudgeDirection] = useState<OrbitNudgeDirection | null>(null);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
+  // Download flow บนมือถือจริง ไม่พึ่ง viewport <= 768px อย่างเดียว
+  // ป้องกัน iPhone/Android ที่เปิด Desktop Site หรือรายงาน viewport กว้าง
+  const [isMobileDownloadDevice, setIsMobileDownloadDevice] = useState(false);
   const [responsiveReady, setResponsiveReady] = useState(false);
   const [productionPreviewActivated, setProductionPreviewActivated] = useState(false);
   const [mobileAccordionOpen, setMobileAccordionOpen] = useState(true);
@@ -1644,7 +1647,9 @@ export default function PlugCustomizer({ plugId }: Props) {
 
     const mq = window.matchMedia("(max-width: 768px)");
     const apply = () => {
-      setIsMobileLayout(mq.matches);
+      const narrowViewport = mq.matches;
+      setIsMobileLayout(narrowViewport);
+      setIsMobileDownloadDevice(narrowViewport || isMobileMessengerDevice());
       setResponsiveReady(true);
     };
 
@@ -2253,7 +2258,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     return out.toDataURL("image/png");
   }
 
-  async function prepareInquiryFiles() {
+  async function prepareInquiryFiles(mobileDownloadTarget?: "pdf" | "production") {
     const validationError = validateShareOrder();
     if (validationError) {
       setOrderError(validationError);
@@ -2285,7 +2290,7 @@ export default function PlugCustomizer({ plugId }: Props) {
 
       // Desktop ใช้ realtime preview 1600×1600 เดิมได้เลย
       // Mobile ใช้ preview realtime ที่เบากว่า จึงค่อย Render 1600×1600 เฉพาะตอนผู้ใช้กดดาวน์โหลดเอกสาร
-      const productionSrc = (!isMobileLayout && productionOrderPreview) || (await renderWithTimeout(
+      const productionSrc = (!isMobileDownloadDevice && productionOrderPreview) || (await renderWithTimeout(
         render({
           transparent: true,
           view: "top",
@@ -2348,14 +2353,36 @@ export default function PlugCustomizer({ plugId }: Props) {
           topRightFileName: mockupFileName,
         };
       });
-      // One-click inquiry download: PDF + Production PNG เท่านั้น
-      // ภาพ Mockup ยังคงถูกฝังอยู่ใน PDF แต่ไม่ดาวน์โหลดเป็นไฟล์แยกแล้ว
-      downloadBlob(pdfBlob, pdfFileName);
-      downloadDataUrl(productionSrc, productionFileName);
-      setInquiryPdfDownloaded(true);
-      setInquiryProductionDownloaded(true);
-      setInquiryMockupDownloaded(false);
-      setMessengerPackageStatus("ดาวน์โหลด PDF + Production PNG แล้ว ✓");
+      // Desktop: คงพฤติกรรมเดิม กดครั้งเดียวแล้วดาวน์โหลด PDF + Production PNG ต่อกัน
+      // Mobile: ห้ามสั่งดาวน์โหลด 2 ไฟล์อัตโนมัติจาก gesture เดียว เพราะ Safari/Chrome mobile
+      // อาจอนุญาตเพียงไฟล์แรก ให้เตรียมไฟล์ไว้แล้วแสดงปุ่มดาวน์โหลดแยกทีละไฟล์แทน
+      if (isMobileDownloadDevice) {
+        // Mobile มีปุ่มดาวน์โหลด 2 ปุ่มแยกตั้งแต่แรก
+        // เมื่อกดปุ่มใด ให้สร้าง package ครั้งเดียว แล้วดาวน์โหลดเฉพาะไฟล์ที่ผู้ใช้กด
+        setInquiryMockupDownloaded(false);
+
+        if (mobileDownloadTarget === "pdf") {
+          const link = document.createElement("a");
+          link.href = pdfUrl;
+          link.download = pdfFileName;
+          link.click();
+          setInquiryPdfDownloaded(true);
+          setMessengerPackageStatus("ดาวน์โหลด PDF แล้ว ✓ • Production PNG พร้อมให้กดดาวน์โหลดแยกได้ทันที");
+        } else if (mobileDownloadTarget === "production") {
+          downloadDataUrl(productionSrc, productionFileName);
+          setInquiryProductionDownloaded(true);
+          setMessengerPackageStatus("ดาวน์โหลด Production PNG แล้ว ✓ • PDF พร้อมให้กดดาวน์โหลดแยกได้ทันที");
+        } else {
+          setMessengerPackageStatus("ไฟล์พร้อมแล้ว ✓ กรุณาดาวน์โหลด PDF และ Production PNG ทีละไฟล์");
+        }
+      } else {
+        downloadBlob(pdfBlob, pdfFileName);
+        downloadDataUrl(productionSrc, productionFileName);
+        setInquiryPdfDownloaded(true);
+        setInquiryProductionDownloaded(true);
+        setInquiryMockupDownloaded(false);
+        setMessengerPackageStatus("ดาวน์โหลด PDF + Production PNG แล้ว ✓");
+      }
     } catch (error) {
       setOrderError(error instanceof Error ? error.message : "เตรียมไฟล์สำหรับสอบถามไม่สำเร็จ");
       setMessengerPackageStatus("");
@@ -2377,6 +2404,22 @@ export default function PlugCustomizer({ plugId }: Props) {
     if (!messengerPackageFiles) return;
     downloadDataUrl(messengerPackageFiles.productionUrl, messengerPackageFiles.productionFileName);
     setInquiryProductionDownloaded(true);
+  }
+
+  async function handleMobileInquiryPdfDownload() {
+    if (messengerPackageFiles) {
+      downloadInquiryPdf();
+      return;
+    }
+    await prepareInquiryFiles("pdf");
+  }
+
+  async function handleMobileInquiryProductionDownload() {
+    if (messengerPackageFiles) {
+      downloadInquiryProductionFile();
+      return;
+    }
+    await prepareInquiryFiles("production");
   }
 
   function downloadInquiryMockupImage() {
@@ -3759,7 +3802,11 @@ export default function PlugCustomizer({ plugId }: Props) {
               <div className="inquiryWizardHead">
                 <div>
                   <div className="orderFlowStepTitle" style={{ marginBottom: 4 }}>เอกสารสำหรับส่งสอบถาม</div>
-                  <div className="hint">ตรวจรายละเอียดด้านล่าง แล้วกดปุ่มเดียวเพื่อดาวน์โหลด PDF + Production PNG</div>
+                  <div className="hint">
+                    {isMobileDownloadDevice
+                      ? "บนมือถือมีปุ่มดาวน์โหลดแยก 2 ปุ่ม: PDF และ Production PNG"
+                      : "ตรวจรายละเอียดด้านล่าง แล้วกดปุ่มเดียวเพื่อดาวน์โหลด PDF + Production PNG"}
+                  </div>
                 </div>
                 <span className="inquiryIdBadge">{inquiryOrderId || "กำลังเตรียมรหัส..."}</span>
               </div>
@@ -3778,18 +3825,61 @@ export default function PlugCustomizer({ plugId }: Props) {
                 2) Production PNG สำหรับส่งตรวจแบบ/ใช้ผลิต
               </div>
 
-              <button
-                type="button"
-                className="btn btnPrimary"
-                disabled={inquiryFileBusy || !productionReady || !pricing.pricingReady}
-                onClick={() => void prepareInquiryFiles()}
-                style={{ width: "100%", minHeight: 52, fontSize: 16, fontWeight: 800 }}
-              >
-                {inquiryFileBusy ? "กำลังสร้าง PDF + Production PNG..." : "⬇ ดาวน์โหลด PDF + Production PNG"}
-              </button>
+              {!isMobileDownloadDevice && (
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={inquiryFileBusy || !productionReady || !pricing.pricingReady}
+                  onClick={() => void prepareInquiryFiles()}
+                  style={{ width: "100%", minHeight: 52, fontSize: 16, fontWeight: 800 }}
+                >
+                  {inquiryFileBusy ? "กำลังสร้าง PDF + Production PNG..." : "⬇ ดาวน์โหลด PDF + Production PNG"}
+                </button>
+              )}
+
+              {isMobileDownloadDevice && (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr",
+                    gap: 10,
+                    marginTop: 4,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    disabled={inquiryFileBusy || !productionReady || !pricing.pricingReady}
+                    onClick={() => void handleMobileInquiryPdfDownload()}
+                    style={{ width: "100%", minHeight: 52, fontSize: 15, fontWeight: 800 }}
+                  >
+                    {inquiryFileBusy && !messengerPackageFiles
+                      ? "กำลังเตรียมไฟล์..."
+                      : inquiryPdfDownloaded
+                        ? "✓ 1) ดาวน์โหลด PDF แล้ว — กดอีกครั้งได้"
+                        : "⬇ 1) ดาวน์โหลด PDF"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btnPrimary"
+                    disabled={inquiryFileBusy || !productionReady || !pricing.pricingReady}
+                    onClick={() => void handleMobileInquiryProductionDownload()}
+                    style={{ width: "100%", minHeight: 52, fontSize: 15, fontWeight: 800 }}
+                  >
+                    {inquiryFileBusy && !messengerPackageFiles
+                      ? "กำลังเตรียมไฟล์..."
+                      : inquiryProductionDownloaded
+                        ? "✓ 2) ดาวน์โหลด Production PNG แล้ว — กดอีกครั้งได้"
+                        : "⬇ 2) ดาวน์โหลด Production PNG"}
+                  </button>
+                </div>
+              )}
 
               <div className="hint" style={{ marginTop: 8 }}>
-                Browser บางเครื่องอาจถามอนุญาตดาวน์โหลดหลายไฟล์ในครั้งแรก ให้กด Allow / อนุญาต
+                {isMobileDownloadDevice
+                  ? "บนมือถือ แยกดาวน์โหลดทีละไฟล์เพื่อป้องกัน Safari/Chrome บล็อกไฟล์ที่สอง • กดไฟล์แรกครั้งเดียว ระบบจะเตรียมทั้งชุดไว้ให้ไฟล์ที่สองพร้อมโหลดทันที"
+                  : "Browser บางเครื่องอาจถามอนุญาตดาวน์โหลดหลายไฟล์ในครั้งแรก ให้กด Allow / อนุญาต"}
               </div>
 
               {messengerPackageStatus && <div className="messengerPackageStatus">{messengerPackageStatus}</div>}
