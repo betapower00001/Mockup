@@ -476,6 +476,35 @@ function loadImage(src: string) {
   });
 }
 
+async function optimizeUploadedDataUrl(
+  src: string,
+  maxDimension: number,
+  quality = 0.9
+) {
+  if (!src.startsWith("data:image/") || src.startsWith("data:image/svg+xml")) return src;
+
+  try {
+    const img = await loadImage(src);
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    if (!width || !height || Math.max(width, height) <= maxDimension) return src;
+
+    const scale = maxDimension / Math.max(width, height);
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, Math.round(width * scale));
+    out.height = Math.max(1, Math.round(height * scale));
+
+    const ctx = out.getContext("2d");
+    if (!ctx) return src;
+    ctx.drawImage(img, 0, 0, out.width, out.height);
+
+    const mime = /^data:(image\/(?:jpeg|webp));/i.exec(src)?.[1]?.toLowerCase() ?? "image/png";
+    return mime === "image/png" ? out.toDataURL("image/png") : out.toDataURL(mime, quality);
+  } catch {
+    return src;
+  }
+}
+
 function cropTransparentBounds(img: HTMLImageElement, alphaThreshold = 8) {
   const canvas = document.createElement("canvas");
   canvas.width = img.naturalWidth || img.width;
@@ -1568,10 +1597,13 @@ export default function PlugCustomizer({ plugId }: Props) {
   const [orbitNudgeTick, setOrbitNudgeTick] = useState(0);
   const [orbitNudgeDirection, setOrbitNudgeDirection] = useState<OrbitNudgeDirection | null>(null);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [responsiveReady, setResponsiveReady] = useState(false);
+  const [productionPreviewActivated, setProductionPreviewActivated] = useState(false);
   const [mobileAccordionOpen, setMobileAccordionOpen] = useState(true);
   const [mobileViewDockOpen, setMobileViewDockOpen] = useState(false);
   const [viewPreviewMap, setViewPreviewMap] = useState<Partial<Record<RenderViewName, string>>>({});
   const [viewPreviewLoading, setViewPreviewLoading] = useState(false);
+  const viewPreviewRunRef = useRef(0);
 
   const [productionReady, setProductionReady] = useState(false);
   const [productionOrderPreview, setProductionOrderPreview] = useState("");
@@ -1611,7 +1643,10 @@ export default function PlugCustomizer({ plugId }: Props) {
     if (typeof window === "undefined") return;
 
     const mq = window.matchMedia("(max-width: 768px)");
-    const apply = () => setIsMobileLayout(mq.matches);
+    const apply = () => {
+      setIsMobileLayout(mq.matches);
+      setResponsiveReady(true);
+    };
 
     apply();
 
@@ -1626,6 +1661,16 @@ export default function PlugCustomizer({ plugId }: Props) {
 
   const renderRef = useRef<PlugRenderFn | null>(null);
   const productionRenderRef = useRef<PlugRenderFn | null>(null);
+
+  useEffect(() => {
+    if (!responsiveReady) return;
+    if (!isMobileLayout || step === "view" || step === "order") {
+      setProductionPreviewActivated(true);
+    }
+  }, [responsiveReady, isMobileLayout, step]);
+
+  const shouldMountProductionPreview =
+    responsiveReady && (!isMobileLayout || productionPreviewActivated);
 
   const plugConfig = useMemo(
     () => getPlugConfig(selectedPlugId, { modelPath: plug.modelPath }),
@@ -1779,7 +1824,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     }, 180);
 
     return () => window.clearTimeout(timer);
-  }, [step, orderDesignSignature, productionReady]);
+  }, [step, orderDesignSignature, productionReady, isMobileLayout]);
 
   // REAL-TIME MOCKUP PREVIEW:
   // ใช้มุม "angle" แบบคงที่ แล้วตัดพื้นที่ว่าง/ซูมสินค้าให้ใหญ่ขึ้น
@@ -1791,19 +1836,19 @@ export default function PlugCustomizer({ plugId }: Props) {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const src = await renderInquiryAngleCloseup(900);
+          const src = await renderInquiryAngleCloseup(isMobileLayout ? 720 : 900);
           if (!cancelled && src) setInquiryMockupPreview(src);
         } catch {
           // ถ้า Render หลักยังไม่พร้อม ให้คงภาพเดิมไว้ แล้วจะลองใหม่เมื่อดีไซน์เปลี่ยน/กลับเข้าหน้า Order
         }
       })();
-    }, 180);
+    }, isMobileLayout ? 280 : 180);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [step, orderDesignSignature, selectedPlugId]);
+  }, [step, orderDesignSignature, selectedPlugId, isMobileLayout]);
 
   // เมื่อแบบ/จำนวนเปลี่ยน ให้เริ่ม Guided Inquiry ใหม่เพื่อไม่ให้ส่งไฟล์คนละแบบ
   useEffect(() => {
@@ -2238,9 +2283,9 @@ export default function PlugCustomizer({ plugId }: Props) {
       const mockupFileName = `${fileId}-${selectedPlugId}-mockup.png`;
       const pdfFileName = `${fileId}-${selectedPlugId}-summary.pdf`;
 
-      // เส้นทาง “สอบถาม” ใช้ Production Preview 1600×1600 ที่สร้างไว้แบบเรียลไทม์
-      // เพื่อไม่ให้ปุ่มนี้ต้อง Render 3000×3000 ซ้ำและเสี่ยง timeout; เส้นทางสั่งผลิตเดิมยังใช้ไฟล์ High-res ของมันตามเดิม
-      const productionSrc = productionOrderPreview || (await renderWithTimeout(
+      // Desktop ใช้ realtime preview 1600×1600 เดิมได้เลย
+      // Mobile ใช้ preview realtime ที่เบากว่า จึงค่อย Render 1600×1600 เฉพาะตอนผู้ใช้กดดาวน์โหลดเอกสาร
+      const productionSrc = (!isMobileLayout && productionOrderPreview) || (await renderWithTimeout(
         render({
           transparent: true,
           view: "top",
@@ -2457,12 +2502,13 @@ export default function PlugCustomizer({ plugId }: Props) {
     setOrderError("");
 
     try {
+      const previewSize = isMobileLayout ? 960 : 1600;
       const src = await render({
         transparent: true,
         view: "top",
         download: false,
-        width: 1600,
-        height: 1600,
+        width: previewSize,
+        height: previewSize,
         filename: `plug-${selectedPlugId}-production-preview.png`,
       });
 
@@ -2596,8 +2642,9 @@ export default function PlugCustomizer({ plugId }: Props) {
     setDragPatternMode(false);
   }
 
-  function handleLogoSelect(id: string, url: string) {
-    setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, url } : l)));
+  async function handleLogoSelect(id: string, url: string) {
+    const optimizedUrl = await optimizeUploadedDataUrl(url, isMobileLayout ? 1600 : 2400, 0.9);
+    setLogos((prev) => prev.map((l) => (l.id === id ? { ...l, url: optimizedUrl } : l)));
     setActiveLogoId(id);
     // ไม่เด้งไปขั้นตอนโลโก้อัตโนมัติ ให้ลูกค้ากดถัดไปเอง
   }
@@ -2662,21 +2709,21 @@ export default function PlugCustomizer({ plugId }: Props) {
     const render = renderRef.current;
     if (!render) return;
 
-    const captures = await Promise.all(
-      A4_VIEWS.map(async (item) => {
-        const src = viewPreviewMap[item.key] ?? await buildInlinePreview(item.key);
-
-        return {
-          label: item.label,
-          src,
-        };
-      })
-    );
+    const captures: { label: string; src: string | null }[] = [];
+    for (const item of A4_VIEWS) {
+      const src = viewPreviewMap[item.key] ?? await buildInlinePreview(item.key);
+      captures.push({ label: item.label, src });
+      if (isMobileLayout) await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    }
 
     const validCaptures = captures.filter((item): item is { label: string; src: string } => typeof item.src === "string" && item.src.length > 0);
     if (!validCaptures.length) return;
 
-    const images = await Promise.all(validCaptures.map((item) => loadImage(item.src)));
+    const images: HTMLImageElement[] = [];
+    for (const item of validCaptures) {
+      images.push(await loadImage(item.src));
+      if (isMobileLayout) await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    }
     const croppedImages = images.map((img) => cropTransparentBounds(img));
 
     const canvas = document.createElement("canvas");
@@ -2761,11 +2808,8 @@ export default function PlugCustomizer({ plugId }: Props) {
       );
     });
 
-    const dataUrl = canvas.toDataURL("image/png");
-    const link = document.createElement("a");
-    link.href = dataUrl;
-    link.download = `plug-${selectedPlugId}-A4-preview.png`;
-    link.click();
+    const blob = await canvasToPngBlob(canvas);
+    downloadBlob(blob, `plug-${selectedPlugId}-A4-preview.png`);
   }
 
   async function downloadViewImage(view: RenderViewName, filename?: string) {
@@ -2793,10 +2837,12 @@ export default function PlugCustomizer({ plugId }: Props) {
     const render = renderRef.current;
     if (!render) return null;
 
+    const previewSize = isMobileLayout ? 720 : undefined;
     const src = await render({
       transparent: false,
       view,
       download: false,
+      ...(previewSize ? { width: previewSize, height: previewSize } : {}),
       filename: `plug-${selectedPlugId}-${view}-preview.png`,
     });
 
@@ -2808,12 +2854,35 @@ export default function PlugCustomizer({ plugId }: Props) {
     const render = renderRef.current;
     if (!render) return;
 
+    const runId = ++viewPreviewRunRef.current;
     setViewPreviewLoading(true);
 
     try {
+      if (isMobileLayout) {
+        const activeFirst = [...INLINE_PREVIEW_VIEWS].sort((a, b) =>
+          a.key === customization.view ? -1 : b.key === customization.view ? 1 : 0
+        );
+        const next: Partial<Record<RenderViewName, string>> = {};
+
+        for (const item of activeFirst) {
+          if (runId !== viewPreviewRunRef.current) return;
+          const src = await buildInlinePreview(item.key);
+          if (runId !== viewPreviewRunRef.current) return;
+          if (src) {
+            next[item.key] = src;
+            setViewPreviewMap((prev) => ({ ...prev, [item.key]: src }));
+          }
+          await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        }
+
+        if (runId === viewPreviewRunRef.current) setViewPreviewMap(next);
+        return;
+      }
+
       const pairs = await Promise.all(
         INLINE_PREVIEW_VIEWS.map(async (item) => [item.key, await buildInlinePreview(item.key)] as const)
       );
+      if (runId !== viewPreviewRunRef.current) return;
 
       const next: Partial<Record<RenderViewName, string>> = {};
       for (const [key, src] of pairs) {
@@ -2821,7 +2890,7 @@ export default function PlugCustomizer({ plugId }: Props) {
       }
       setViewPreviewMap(next);
     } finally {
-      setViewPreviewLoading(false);
+      if (runId === viewPreviewRunRef.current) setViewPreviewLoading(false);
     }
   }
 
@@ -2830,7 +2899,7 @@ export default function PlugCustomizer({ plugId }: Props) {
 
     const timer = window.setTimeout(() => {
       void refreshInlinePreviews();
-    }, 120);
+    }, isMobileLayout ? 260 : 120);
 
     return () => window.clearTimeout(timer);
   }, [
@@ -2845,6 +2914,7 @@ export default function PlugCustomizer({ plugId }: Props) {
     patternTransform.zoom,
     patternRotation,
     logos,
+    isMobileLayout,
   ]);
 
   async function downloadProductionSampleTop() {
@@ -2995,9 +3065,11 @@ export default function PlugCustomizer({ plugId }: Props) {
     link.click();
   }
 
-  function handlePatternUpload(base64: string) {
-    setUploadedPatterns((prev) => [base64, ...prev]);
-    patchCustomization({ patternUrl: base64 });
+  async function handlePatternUpload(base64: string) {
+    const optimized = await optimizeUploadedDataUrl(base64, isMobileLayout ? 2048 : 3072, 0.9);
+    // จำกัดประวัติรูปอัปโหลด ลดการค้าง Base64 จำนวนมากใน RAM โดยยังมีรูปย้อนหลังให้เลือกได้
+    setUploadedPatterns((prev) => [optimized, ...prev.filter((item) => item !== optimized)].slice(0, 4));
+    patchCustomization({ patternUrl: optimized });
     setPatternTransform(DEFAULT_PATTERN_TRANSFORM);
     setPatternRotation(0);
     setDragPatternMode(false);
@@ -3318,7 +3390,7 @@ export default function PlugCustomizer({ plugId }: Props) {
           <div className="divider" />
 
           <div style={{ opacity: hasPattern ? 1 : 0.45 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 12 }}>
+            <div className="patternControlGrid">
               <div>
                 <Slider
                   label={`X: ${patternTransform.x.toFixed(2)}`}
@@ -4077,25 +4149,31 @@ export default function PlugCustomizer({ plugId }: Props) {
                 <div className="productionPreviewInset" aria-label="โมเดลสำหรับ Export ส่งผลิต">
                   <div className="productionPreviewHead">
                     <span>ไฟล์ผลิต</span>
-                    <span className="productionPreviewDot" aria-hidden="true" />
+                    <span className={`productionPreviewDot ${shouldMountProductionPreview ? "" : "waiting"}`} aria-hidden="true" />
                   </div>
                   <div className="productionPreviewCanvas">
-                    <Plug3D
-                      key={productionPlugConfig.modelPath}
-                      config={productionPlugConfig}
-                      logos={logos}
-                      activeLogoId={activeLogoId}
-                      patternUrl={customization.patternUrl}
-                      patternTransform={patternTransform}
-                      patternRotation={patternRotation}
-                      colors={safeColors}
-                      view="top"
-                      renderMode
-                      onRenderReady={(render) => {
-                        productionRenderRef.current = render;
-                        setProductionReady(true);
-                      }}
-                    />
+                    {shouldMountProductionPreview ? (
+                      <Plug3D
+                        key={productionPlugConfig.modelPath}
+                        config={productionPlugConfig}
+                        logos={logos}
+                        activeLogoId={activeLogoId}
+                        patternUrl={customization.patternUrl}
+                        patternTransform={patternTransform}
+                        patternRotation={patternRotation}
+                        colors={safeColors}
+                        view="top"
+                        renderMode
+                        onRenderReady={(render) => {
+                          productionRenderRef.current = render;
+                          setProductionReady(true);
+                        }}
+                      />
+                    ) : (
+                      <div className="productionPreviewDeferred" aria-label="Production Preview จะโหลดเมื่อจำเป็น">
+                        <span>พร้อมโหลด</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -4772,6 +4850,12 @@ const CSS = `
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 6px;
+}
+
+.patternControlGrid{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) 180px;
+  gap:12px;
 }
 
 .pattern-grid{
@@ -5820,6 +5904,10 @@ const CSS = `
   background:#22c55e;
   box-shadow:0 0 0 3px rgba(34,197,94,.16);
 }
+.productionPreviewDot.waiting{
+  background:#94a3b8;
+  box-shadow:0 0 0 3px rgba(148,163,184,.14);
+}
 
 .productionPreviewCanvas{
   flex:1;
@@ -5831,6 +5919,18 @@ const CSS = `
   display:block;
   width:100% !important;
   height:100% !important;
+}
+
+.productionPreviewDeferred{
+  width:100%;
+  height:100%;
+  display:grid;
+  place-items:center;
+  padding:8px;
+  text-align:center;
+  color:#64748b;
+  font-size:9px;
+  font-weight:800;
 }
 
 .mobileOrbitOverlay,
@@ -6463,6 +6563,11 @@ input[type="range"]{
 
   .quickActionsCard{
     display:none;
+  }
+
+  .patternControlGrid{
+    grid-template-columns:1fr;
+    gap:10px;
   }
 
   .mock{
